@@ -217,7 +217,7 @@ func newUint64Hashmap(t *testing.T, maxEntries uint32) *uint64Hashmap {
 	if err := h.Init(); err != nil {
 		t.Fatal(err)
 	}
-	return &uint64Hashmap{inner: m}
+	return &uint64Hashmap{inner: h}
 }
 
 type uint64Hashmap struct {
