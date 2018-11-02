@@ -159,12 +159,64 @@ func (asm *Assembler) Raw(ri RawInstruction) {
 	asm.insns = append(asm.insns, ri.pack())
 }
 
+// ALU64Reg emits a 64 bit ALU instruction on registers.
+//
+//     dst = dst <op> src
+func (asm *Assembler) ALU64Reg(op ALUOp, dst, src Register) {
+	asm.Raw(RawInstruction{
+		Code: alu64Code(op, X),
+		Dst:  dst,
+		Src:  src,
+	})
+}
+
+// ALU32Reg emits a 32 bit ALU instruction on registers. Schematically:
+//
+//     (uint32)dst = (uint32)dst <op> (uint32)src
+func (asm *Assembler) ALU32Reg(op ALUOp, dst, src Register) {
+	asm.Raw(RawInstruction{
+		Code: alu32Code(op, X),
+		Dst:  dst,
+		Src:  src,
+	})
+}
+
+// ALU64Imm emits a 64 bit ALU instruction on a 32 bit immediate. Schematically:
+//
+//     dst = dst <op> (uint64)imm
+func (asm *Assembler) ALU64Imm(op ALUOp, dst Register, imm int32) {
+	asm.Raw(RawInstruction{
+		Code: alu64Code(op, K),
+		Dst:  dst,
+		Imm:  imm,
+	})
+}
+
+// ALU32Imm emits a 32 bit ALU instruction on a 32 bit immediate. Schematically:
+//
+//     (uint32)dst = (uint32)dst <op> imm
+func (asm *Assembler) ALU32Imm(op ALUOp, dst Register, imm int32) {
+	asm.Raw(RawInstruction{
+		Code: alu64Code(op, K),
+		Dst:  dst,
+		Imm:  imm,
+	})
+}
+
 // Assemble assembles the code and returns the raw instructions.
 func (asm *Assembler) Assemble() []uint64 {
 	// Copy the instructions to avoid slice aliasing issues.
 	insns := make([]uint64, len(asm.insns))
 	copy(insns, asm.insns)
 	return insns
+}
+
+func alu64Code(op ALUOp, operand SourceOperand) uint8 {
+	return uint8(ALU64) | uint8(op) | uint8(operand)
+}
+
+func alu32Code(op ALUOp, operand SourceOperand) uint8 {
+	return uint8(ALU) | uint8(op) | uint8(operand)
 }
 
 // RawInstruction specifies a raw eBPF instruction.
