@@ -180,7 +180,11 @@ func uint32Bytes(i *uint32) []byte {
 	return (*[4]byte)(unsafe.Pointer(i))[:]
 }
 
-// bptr creates a u64ptr which carries &b[0].
+// bptr creates a u64ptr which carries &b[0]. If len(b) == 0, bptr returns
+// the null pointer.
 func bptr(b []byte) u64ptr {
+	if len(b) == 0 {
+		return u64ptr{p: unsafe.Pointer(nil)}
+	}
 	return u64ptr{p: unsafe.Pointer(&b[0])}
 }
