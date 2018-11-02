@@ -149,12 +149,6 @@ const (
 // MaxInstructions is the maximum number of instructions in a BPF or eBPF program.
 const MaxInstructions = 4096
 
-// Code holds assembled BPF or eBPF instructions.
-type Code struct {
-	insns   []uint64
-	classic bool
-}
-
 // An Assembler assembles eBPF instructions.
 type Assembler struct {
 	insns []uint64
@@ -165,12 +159,12 @@ func (asm *Assembler) Raw(ri RawInstruction) {
 	asm.insns = append(asm.insns, ri.pack())
 }
 
-// Code returns the assembled code.
-func (asm *Assembler) Code() Code {
+// Assemble assembles the code and returns the raw instructions.
+func (asm *Assembler) Assemble() []uint64 {
 	// Copy the instructions to avoid slice aliasing issues.
 	insns := make([]uint64, len(asm.insns))
 	copy(insns, asm.insns)
-	return Code{insns: insns, classic: false}
+	return insns
 }
 
 // RawInstruction specifies a raw eBPF instruction.
@@ -199,6 +193,7 @@ type RawInstruction struct {
 // pack packs the Dst and Src fields into 4 bits each, and performs the
 // final assembly of the instruction.
 func (ri RawInstruction) pack() uint64 {
+	// TODO(acln): is this correct on big endian systems?
 	var i uint64
 	i |= uint64(ri.Code) << 56
 	i |= uint64(ri.Dst) << 52
