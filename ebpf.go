@@ -154,10 +154,7 @@ func IsTooBig(err error) bool {
 	return false
 }
 
-// Low level system call hooks.
-
-// closeFunc hooks the close(2) system call.
-var closeFunc = unix.Close
+// System call hooks.
 
 // bpfFunc hooks the bpf(2) system call.
 var bpfFunc = sysBPF

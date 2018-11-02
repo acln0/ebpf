@@ -62,7 +62,7 @@ type mapFD struct {
 // Init creates a map as specified by cfg and, if successful, initializes
 // m to refer to the new map.
 func (m *mapFD) Init(cfg *mapConfig) error {
-	return wrapMapOpError("init", nil)
+	return wrapMapOpError("init", m.init(cfg))
 }
 
 // Lookup looks up the value for k and stores it in v. If k is not found
@@ -137,6 +137,20 @@ func (m *mapFD) Iterate(fn func(k, v []byte) (stop bool), startHint []byte) erro
 // Close destroys the map and releases its associated file descriptor.
 func (m *mapFD) Close() error {
 	return m.fd.Close()
+}
+
+func (m *mapFD) init(cfg *mapConfig) error {
+	sysfd, err := rawCreateMap(cfg)
+	if err != nil {
+		return err
+	}
+	if err := m.fd.Init(sysfd); err != nil {
+		return err
+	}
+	m.keySize = int(cfg.KeySize)
+	m.valueSize = int(cfg.ValueSize)
+	m.maxEntries = cfg.MaxEntries
+	return nil
 }
 
 func (m *mapFD) lookup(k, v []byte) error {
