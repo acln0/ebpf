@@ -34,14 +34,14 @@ func TestHashmap(t *testing.T) {
 }
 
 func testHashmapLookup(t *testing.T) {
-	hmap := newUint64Hashmap(t, 4)
-	defer hmap.Close()
+	h := newUint64Hashmap(t, 4)
+	defer h.Close()
 
 	k, v := uint64(4), uint64(8)
-	if err := hmap.Set(k, v); err != nil {
+	if err := h.Set(k, v); err != nil {
 		t.Fatal(err)
 	}
-	got, err := hmap.Lookup(k)
+	got, err := h.Lookup(k)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func testHashmapLookup(t *testing.T) {
 		t.Fatalf("Lookup(%d): got %d, want %d", k, got, v)
 	}
 	k = uint64(123)
-	got, err = hmap.Lookup(k)
+	got, err = h.Lookup(k)
 	if err == nil {
 		t.Fatalf("Lookup(%d) succeeded: got %x", k, got)
 	}
@@ -59,14 +59,14 @@ func testHashmapLookup(t *testing.T) {
 }
 
 func testHashmapSet(t *testing.T) {
-	hmap := newUint64Hashmap(t, 4)
-	defer hmap.Close()
+	h := newUint64Hashmap(t, 4)
+	defer h.Close()
 
 	k, v := uint64(15), uint64(16)
-	if err := hmap.Set(k, v); err != nil {
+	if err := h.Set(k, v); err != nil {
 		t.Fatal(err)
 	}
-	got, err := hmap.Lookup(k)
+	got, err := h.Lookup(k)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,10 +74,10 @@ func testHashmapSet(t *testing.T) {
 		t.Fatalf("Lookup(%d): got %d, want %d", k, got, v)
 	}
 	v = uint64(23)
-	if err := hmap.Set(k, v); err != nil {
+	if err := h.Set(k, v); err != nil {
 		t.Fatal(err)
 	}
-	got, err = hmap.Lookup(k)
+	got, err = h.Lookup(k)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,18 +87,18 @@ func testHashmapSet(t *testing.T) {
 }
 
 func testHashmapUpdate(t *testing.T) {
-	hmap := newUint64Hashmap(t, 4)
-	defer hmap.Close()
+	h := newUint64Hashmap(t, 4)
+	defer h.Close()
 
 	k, v := uint64(3), uint64(50)
-	if err := hmap.Set(k, v); err != nil {
+	if err := h.Set(k, v); err != nil {
 		t.Fatal(err)
 	}
 	v = uint64(51)
-	if err := hmap.Update(k, v); err != nil {
+	if err := h.Update(k, v); err != nil {
 		t.Fatal(err)
 	}
-	got, err := hmap.Lookup(k)
+	got, err := h.Lookup(k)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func testHashmapUpdate(t *testing.T) {
 		t.Fatalf("Lookup(%d): got %d, want %d", k, got, v)
 	}
 	k = uint64(5)
-	err = hmap.Update(k, v)
+	err = h.Update(k, v)
 	if err == nil {
 		t.Fatalf("succeeded for non-existent key")
 	}
@@ -116,15 +116,15 @@ func testHashmapUpdate(t *testing.T) {
 }
 
 func testHashmapCreate(t *testing.T) {
-	hmap := newUint64Hashmap(t, 4)
-	defer hmap.Close()
+	h := newUint64Hashmap(t, 4)
+	defer h.Close()
 
 	k, v := uint64(23), uint64(42)
-	if err := hmap.Create(k, v); err != nil {
+	if err := h.Create(k, v); err != nil {
 		t.Fatal(err)
 	}
 	v = uint64(59)
-	err := hmap.Create(k, v)
+	err := h.Create(k, v)
 	if err == nil {
 		t.Fatalf("succeeded for existing key")
 	}
@@ -134,8 +134,8 @@ func testHashmapCreate(t *testing.T) {
 }
 
 func testHashmapIterate(t *testing.T) {
-	hmap := newUint64Hashmap(t, 8)
-	defer hmap.Close()
+	h := newUint64Hashmap(t, 8)
+	defer h.Close()
 
 	pairs := map[uint64]uint64{
 		4:  8,
@@ -143,7 +143,7 @@ func testHashmapIterate(t *testing.T) {
 		23: 42,
 	}
 	for k, v := range pairs {
-		if err := hmap.Set(k, v); err != nil {
+		if err := h.Set(k, v); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -153,7 +153,7 @@ func testHashmapIterate(t *testing.T) {
 		seen[k] = v
 		return false
 	}
-	if err := hmap.Iterate(fn, hint); err != nil {
+	if err := h.Iterate(fn, hint); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(pairs, seen) {
@@ -162,21 +162,21 @@ func testHashmapIterate(t *testing.T) {
 }
 
 func testHashmapDelete(t *testing.T) {
-	hmap := newUint64Hashmap(t, 4)
-	defer hmap.Close()
+	h := newUint64Hashmap(t, 4)
+	defer h.Close()
 
 	k, v := uint64(10), uint64(20)
-	if err := hmap.Create(k, v); err != nil {
+	if err := h.Create(k, v); err != nil {
 		t.Fatal(err)
 	}
-	if err := hmap.Delete(k); err != nil {
+	if err := h.Delete(k); err != nil {
 		t.Fatal(err)
 	}
-	got, err := hmap.Lookup(k)
+	got, err := h.Lookup(k)
 	if err == nil {
 		t.Fatalf("Lookup(%d) succeeded after Delete(%d): got %d", k, k, got)
 	}
-	err = hmap.Delete(k)
+	err = h.Delete(k)
 	if err == nil {
 		t.Fatalf("succeeded for non-existent key")
 	}
@@ -187,17 +187,17 @@ func testHashmapDelete(t *testing.T) {
 
 func testHashmapE2BIG(t *testing.T) {
 	const size = 16
-	hmap := newUint64Hashmap(t, size)
-	defer hmap.Close()
+	h := newUint64Hashmap(t, size)
+	defer h.Close()
 
 	v := uint64(100)
 	for i := 0; i < size; i++ {
 		k := uint64(i)
-		if err := hmap.Create(k, v); err != nil {
+		if err := h.Create(k, v); err != nil {
 			t.Fatal(err)
 		}
 	}
-	err := hmap.Create(uint64(size), v)
+	err := h.Create(uint64(size), v)
 	if err == nil {
 		t.Fatalf("Create succeeded on map at size limit")
 	}
@@ -208,13 +208,13 @@ func testHashmapE2BIG(t *testing.T) {
 
 func newUint64Hashmap(t *testing.T, maxEntries uint32) *uint64Hashmap {
 	t.Helper()
-	m := &Hashmap{
+	h := &Hashmap{
 		KeySize:    uint32(unsafe.Sizeof(uint64(0))),
 		ValueSize:  uint32(unsafe.Sizeof(uint64(0))),
 		MaxEntries: maxEntries,
 		ObjectName: "test_map",
 	}
-	if err := m.Init(); err != nil {
+	if err := h.Init(); err != nil {
 		t.Fatal(err)
 	}
 	return &uint64Hashmap{inner: m}
@@ -224,37 +224,37 @@ type uint64Hashmap struct {
 	inner *Hashmap
 }
 
-func (hmap *uint64Hashmap) Lookup(k uint64) (v uint64, err error) {
-	err = hmap.inner.Lookup(uint64b(&k), uint64b(&v))
+func (h *uint64Hashmap) Lookup(k uint64) (v uint64, err error) {
+	err = h.inner.Lookup(uint64b(&k), uint64b(&v))
 	return v, err
 }
 
-func (hmap *uint64Hashmap) Set(k, v uint64) error {
-	return hmap.inner.Set(uint64b(&k), uint64b(&v))
+func (h *uint64Hashmap) Set(k, v uint64) error {
+	return h.inner.Set(uint64b(&k), uint64b(&v))
 }
 
-func (hmap *uint64Hashmap) Create(k, v uint64) error {
-	return hmap.inner.Create(uint64b(&k), uint64b(&v))
+func (h *uint64Hashmap) Create(k, v uint64) error {
+	return h.inner.Create(uint64b(&k), uint64b(&v))
 }
 
-func (hmap *uint64Hashmap) Update(k, v uint64) error {
-	return hmap.inner.Update(uint64b(&k), uint64b(&v))
+func (h *uint64Hashmap) Update(k, v uint64) error {
+	return h.inner.Update(uint64b(&k), uint64b(&v))
 }
 
-func (hmap *uint64Hashmap) Iterate(fn func(k, v uint64) bool, hint uint64) error {
+func (h *uint64Hashmap) Iterate(fn func(k, v uint64) bool, hint uint64) error {
 	bfn := func(kb, vb []byte) bool {
 		kp, vp := uint64ptr(kb), uint64ptr(vb)
 		return fn(*kp, *vp)
 	}
-	return hmap.inner.Iterate(bfn, uint64b(&hint))
+	return h.inner.Iterate(bfn, uint64b(&hint))
 }
 
-func (hmap *uint64Hashmap) Delete(k uint64) error {
-	return hmap.inner.Delete(uint64b(&k))
+func (h *uint64Hashmap) Delete(k uint64) error {
+	return h.inner.Delete(uint64b(&k))
 }
 
-func (hmap *uint64Hashmap) Close() error {
-	return hmap.inner.Close()
+func (h *uint64Hashmap) Close() error {
+	return h.inner.Close()
 }
 
 func uint64b(v *uint64) []byte {

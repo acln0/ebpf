@@ -34,51 +34,51 @@ type Hashmap struct {
 }
 
 // Init initializes the hashmap.
-func (hmap *Hashmap) Init() error {
+func (h *Hashmap) Init() error {
 	cfg := mapConfig{
 		Type:       mapHash,
-		KeySize:    hmap.KeySize,
-		ValueSize:  hmap.ValueSize,
-		MaxEntries: hmap.MaxEntries,
-		Name:       newObjectName(hmap.ObjectName),
+		KeySize:    h.KeySize,
+		ValueSize:  h.ValueSize,
+		MaxEntries: h.MaxEntries,
+		Name:       newObjectName(h.ObjectName),
 	}
 	m := new(mapFD)
 	if err := m.Init(&cfg); err != nil {
 		return err
 	}
-	hmap.m = m
+	h.m = m
 	return nil
 }
 
 // Lookup looks up the value for k and stores it in v. If k is not found
 // in the map, Lookup returns an error such that IsNotExist(err) == true.
-func (hmap *Hashmap) Lookup(k, v []byte) error {
-	return hmap.m.Lookup(k, v)
+func (h *Hashmap) Lookup(k, v []byte) error {
+	return h.m.Lookup(k, v)
 }
 
 // Set sets the value for k to v. If an entry for k exists in the map,
 // it will be overwritten.
-func (hmap *Hashmap) Set(k, v []byte) error {
-	return hmap.m.Set(k, v)
+func (h *Hashmap) Set(k, v []byte) error {
+	return h.m.Set(k, v)
 }
 
 // Create creates a new entry for k in the map, and sets the value to v.
 // If an entry for k exists in the map, Create returns an error such that
 // IsExist(err) == true.
-func (hmap *Hashmap) Create(k, v []byte) error {
-	return hmap.m.Create(k, v)
+func (h *Hashmap) Create(k, v []byte) error {
+	return h.m.Create(k, v)
 }
 
 // Update updates the entry for k to v. If an entry for k does not exist in
 // the map, Update returns an error such that IsNotExist(err) == true.
-func (hmap *Hashmap) Update(k, v []byte) error {
-	return hmap.m.Update(k, v)
+func (h *Hashmap) Update(k, v []byte) error {
+	return h.m.Update(k, v)
 }
 
 // Delete deletes the entry for k. If an entry for k does not exist in the
 // map, Delete returns an error such that IsNotExist(err) == true.
-func (hmap *Hashmap) Delete(k []byte) error {
-	return hmap.m.Delete(k)
+func (h *Hashmap) Delete(k []byte) error {
+	return h.m.Delete(k)
 }
 
 // Iterate iterates over all keys in the map and calls fn for each key-value
@@ -90,13 +90,13 @@ func (hmap *Hashmap) Delete(k []byte) error {
 // nature of BPF map iterators, on Linux kernels older than 4.12, Iterate
 // requires a non-nil startHint. On Linux >= 4.12, startHint may be nil, but
 // it is recommended to pass a valid one nevertheless.
-func (hmap *Hashmap) Iterate(fn func(k, v []byte) (stop bool), startHint []byte) error {
-	return hmap.m.Iterate(fn, startHint)
+func (h *Hashmap) Iterate(fn func(k, v []byte) (stop bool), startHint []byte) error {
+	return h.m.Iterate(fn, startHint)
 }
 
 // Close destroys the hashmap and releases the associated file descriptor.
 // After a call to Close, future method calls on the Hashmap will return
 // errors.
-func (hmap *Hashmap) Close() error {
-	return hmap.m.Close()
+func (h *Hashmap) Close() error {
+	return h.m.Close()
 }
