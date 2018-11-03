@@ -1,4 +1,4 @@
-module acln.ro/ebpf/samples/lo-mon
+module acln.ro/ebpf/_samples/ifacesnoop
 
 require (
 	acln.ro/ebpf v0.1.0

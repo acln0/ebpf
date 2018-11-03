@@ -12,14 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// lo-mon monitors packets seen on the loopback interface.
+// ifacesnoop monitors TCP, UDP and ICMP packets on a network interface.
 //
-// See samples/bpf/sock_example.c in the Linux source tree.
+// Based on samples/bpf/sock_example.c in the Linux source tree.
+//
+// usage: ifacesnoop [interface]
 package main
 
 import (
+	"encoding/binary"
+	"fmt"
 	"log"
 	"net"
+	"os"
 	"time"
 	"unsafe"
 
@@ -32,13 +37,18 @@ const (
 	offsetofIPHeader = 23
 )
 
+func htons(x uint16) uint16 {
+	var buf [2]byte
+	binary.LittleEndian.PutUint16(buf[:], x)
+	return binary.BigEndian.Uint16(buf[:])
+}
+
 func rawSocket(ifaceName string) (fd int, err error) {
 	const (
 		domain = unix.AF_PACKET
 		typ    = unix.SOCK_RAW | unix.SOCK_NONBLOCK | unix.SOCK_CLOEXEC
-		proto  = unix.ETH_P_ALL
 	)
-	sock, err := unix.Socket(domain, typ, proto)
+	sock, err := unix.Socket(domain, typ, unix.ETH_P_ALL)
 	if err != nil {
 		return 0, err
 	}
@@ -48,7 +58,7 @@ func rawSocket(ifaceName string) (fd int, err error) {
 	}
 	addr := &unix.SockaddrLinklayer{
 		Ifindex:  iface.Index,
-		Protocol: proto,
+		Protocol: htons(unix.ETH_P_ALL), // this htons is important
 	}
 	if err := unix.Bind(sock, addr); err != nil {
 		return 0, err
@@ -74,32 +84,36 @@ func assembleProgram(mapFD uint32) []ebpf.RawInstruction {
 }
 
 func main() {
-	sock, err := rawSocket("lo")
+	if len(os.Args) != 2 {
+		fmt.Println("usage: ifacesnoop [interface]")
+		os.Exit(2)
+	}
+	sock, err := rawSocket(os.Args[1])
 	if err != nil {
 		log.Fatalf("rawSocket: %v", err)
 	}
 	arr := &ebpf.Array{
 		NumElements: 256,
 		ValueSize:   8,
-		ObjectName: "lo_mon_arr",
+		ObjectName:  "ifacesnoop_arr",
 	}
 	if err := arr.Init(); err != nil {
 		log.Fatal(err)
 	}
 	instructions := assembleProgram(uint32(arr.Sysfd()))
-	log.Println(len(instructions))
-	logbuf := make([]byte, 1024)
+	logbuf := make([]byte, 128*1024)
 	prog := &ebpf.Prog{
 		Type:         ebpf.ProgTypeSocketFilter,
 		Instructions: instructions,
-		License:      "GPL",
+		License:      "Dual Apache/GPL", // TODO(acln): is this right?
 		LogLevel:     1,
 		LogBuffer:    logbuf,
-		ObjectName:   "lo_mon_prog",
+		ObjectName:   "ifacesnoop_prog",
 	}
-	if err := prog.Load(); err != nil {
-		log.Printf("prog.Load(): %v", err)
-		log.Fatalf("log buffer: %s", logbuf)
+	err = prog.Load()
+	log.Printf("load log: %s\n", logbuf)
+	if err != nil {
+		log.Fatalf("prog.Load(): %v", err)
 	}
 	if err := prog.Attach(sock); err != nil {
 		log.Fatalf("prog.Attach(): %v", err)
@@ -109,7 +123,7 @@ func main() {
 		udpCount  uint64
 		icmpCount uint64
 	)
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 1000; i++ {
 		if err := arr.Lookup(unix.IPPROTO_TCP, uint64b(&tcpCount)); err != nil {
 			log.Fatal(err)
 		}
@@ -119,6 +133,7 @@ func main() {
 		if err := arr.Lookup(unix.IPPROTO_ICMP, uint64b(&icmpCount)); err != nil {
 			log.Fatal(err)
 		}
+		fmt.Printf("TCP: %d, UDP: %d, ICMP: %d\n", tcpCount, udpCount, icmpCount)
 		time.Sleep(1 * time.Second)
 	}
 }
