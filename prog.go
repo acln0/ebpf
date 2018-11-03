@@ -104,7 +104,6 @@ func (p *Prog) Load() error {
 		Flags:              p.Flags,
 		Name:               newObjectName(p.ObjectName),
 		IfIndex:            p.IfIndex,
-		ExpectedAttachType: p.ExpectedAttachType,
 	}
 	pfd := new(progFD)
 	if err := pfd.Init(&cfg); err != nil {
@@ -166,7 +165,8 @@ type progConfig struct {
 	Flags              uint32
 	Name               objectName
 	IfIndex            uint32
-	ExpectedAttachType uint32
+
+	// TODO(acln): add ExpectedAttachType back
 }
 
 func sysProgLoad(cfg *progConfig) (int, error) {
