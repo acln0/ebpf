@@ -530,9 +530,9 @@ type Instruction struct {
 func (i Instruction) Pack() RawInstruction {
 	return RawInstruction{
 		Code: i.Code,
-		Regs: uint8(i.Dst << 4) | uint8(i.Src),
-		Off: i.Off,
-		Imm: i.Imm,
+		Regs: uint8(i.Dst<<4) | uint8(i.Src),
+		Off:  i.Off,
+		Imm:  i.Imm,
 	}
 }
 
