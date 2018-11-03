@@ -465,7 +465,7 @@ func (a *Assembler) JumpReg(cond JumpCondition, dst, src Register, offset int16)
 //     if dst <op> imm { goto pc + offset }
 func (a *Assembler) JumpImm(cond JumpCondition, dst Register, imm int32, offset int16) {
 	a.Raw(Instruction{
-		Code: uint8(JMP) | uint8(cond) | uint8(X),
+		Code: uint8(JMP) | uint8(cond) | uint8(K),
 		Dst:  dst,
 		Off:  offset,
 		Imm:  imm,
@@ -476,7 +476,6 @@ func (a *Assembler) JumpImm(cond JumpCondition, dst Register, imm int32, offset 
 func (a *Assembler) Call(fn KernelFunction) {
 	a.Raw(Instruction{
 		Code: uint8(JMP) | uint8(CALL),
-		Src:  PseudoCall,
 		Imm:  int32(fn),
 	})
 }
@@ -530,7 +529,7 @@ type Instruction struct {
 func (i Instruction) Pack() RawInstruction {
 	return RawInstruction{
 		Code: i.Code,
-		Regs: uint8(i.Dst<<4) | uint8(i.Src),
+		Regs: uint8(i.Src<<4) | uint8(i.Dst),
 		Off:  i.Off,
 		Imm:  i.Imm,
 	}
