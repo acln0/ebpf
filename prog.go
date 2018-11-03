@@ -100,6 +100,7 @@ func (p *Prog) Load() error {
 		License:            bptr(nullTerminatedString(p.License)),
 		LogLevel:           p.LogLevel,
 		LogBufSize:         uint32(len(p.LogBuffer)),
+		LogBuf:             bptr(p.LogBuffer),
 		KernelVersion:      p.KernelVersion,
 		Flags:              p.Flags,
 		Name:               newObjectName(p.ObjectName),
