@@ -143,7 +143,102 @@ type KernelFunction int32
 
 // Kernel functions.
 const (
-// TODO(acln): add function call definitions.
+	KernelFunctionUnspec KernelFunction = iota // bpf_unspec
+
+	MapLookupElem     // bpf_map_lookup_elem
+	MapUpdateElem     // bpf_map_update_elem
+	MapDeleteElem     // bpf_map_delete_elem
+	ProbeRead         // bpf_probe_read
+	KTimeGetNS        // bpf_ktime_get_ns
+	TracePrintk       // bpf_trace_printk
+	GetPrandomU32     // bpf_get_prandom_u32
+	GetSMPProcessorID // bpf_get_smp_processor_id
+	SKBStoreBytes     // bpf_skb_store_bytes
+	L3CSumReplace     // bpf_l3_csum_replace
+	L4CSumReplace     // bpf_l4_csum_replace
+	TailCall          // bpf_tail_call
+	CloneRedirect     // bpf_clone_redirect
+
+// TODO(acln): add more of these. For now, all we need is the map functions.
+/*
+	FN(get_current_pid_tgid),	\
+	FN(get_current_uid_gid),	\
+	FN(get_current_comm),		\
+	FN(get_cgroup_classid),		\
+	FN(skb_vlan_push),		\
+	FN(skb_vlan_pop),		\
+	FN(skb_get_tunnel_key),		\
+	FN(skb_set_tunnel_key),		\
+	FN(perf_event_read),		\
+	FN(redirect),			\
+	FN(get_route_realm),		\
+	FN(perf_event_output),		\
+	FN(skb_load_bytes),		\
+	FN(get_stackid),		\
+	FN(csum_diff),			\
+	FN(skb_get_tunnel_opt),		\
+	FN(skb_set_tunnel_opt),		\
+	FN(skb_change_proto),		\
+	FN(skb_change_type),		\
+	FN(skb_under_cgroup),		\
+	FN(get_hash_recalc),		\
+	FN(get_current_task),		\
+	FN(probe_write_user),		\
+	FN(current_task_under_cgroup),	\
+	FN(skb_change_tail),		\
+	FN(skb_pull_data),		\
+	FN(csum_update),		\
+	FN(set_hash_invalid),		\
+	FN(get_numa_node_id),		\
+	FN(skb_change_head),		\
+	FN(xdp_adjust_head),		\
+	FN(probe_read_str),		\
+	FN(get_socket_cookie),		\
+	FN(get_socket_uid),		\
+	FN(set_hash),			\
+	FN(setsockopt),			\
+	FN(skb_adjust_room),		\
+	FN(redirect_map),		\
+	FN(sk_redirect_map),		\
+	FN(sock_map_update),		\
+	FN(xdp_adjust_meta),		\
+	FN(perf_event_read_value),	\
+	FN(perf_prog_read_value),	\
+	FN(getsockopt),			\
+	FN(override_return),		\
+	FN(sock_ops_cb_flags_set),	\
+	FN(msg_redirect_map),		\
+	FN(msg_apply_bytes),		\
+	FN(msg_cork_bytes),		\
+	FN(msg_pull_data),		\
+	FN(bind),			\
+	FN(xdp_adjust_tail),		\
+	FN(skb_get_xfrm_state),		\
+	FN(get_stack),			\
+	FN(skb_load_bytes_relative),	\
+	FN(fib_lookup),			\
+	FN(sock_hash_update),		\
+	FN(msg_redirect_hash),		\
+	FN(sk_redirect_hash),		\
+	FN(lwt_push_encap),		\
+	FN(lwt_seg6_store_bytes),	\
+	FN(lwt_seg6_adjust_srh),	\
+	FN(lwt_seg6_action),		\
+	FN(rc_repeat),			\
+	FN(rc_keydown),			\
+	FN(skb_cgroup_id),		\
+	FN(get_current_cgroup_id),	\
+	FN(get_local_storage),		\
+	FN(sk_select_reuseport),	\
+	FN(skb_ancestor_cgroup_id),	\
+	FN(sk_lookup_tcp),		\
+	FN(sk_lookup_udp),		\
+	FN(sk_release),			\
+	FN(map_push_elem),		\
+	FN(map_pop_elem),		\
+	FN(map_peek_elem),		\
+	FN(msg_push_data),
+*/
 )
 
 // MaxInstructions is the maximum number of instructions in a BPF or eBPF program.
@@ -381,6 +476,7 @@ func (a *Assembler) JumpImm(cond JumpCondition, dst Register, imm int32, offset 
 func (a *Assembler) Call(fn KernelFunction) {
 	a.Raw(Instruction{
 		Code: uint8(JMP) | uint8(CALL),
+		Src:  PseudoCall,
 		Imm:  int32(fn),
 	})
 }
