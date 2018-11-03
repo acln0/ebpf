@@ -94,17 +94,17 @@ type Prog struct {
 // Load loads the program into the kernel.
 func (p *Prog) Load() error {
 	cfg := progConfig{
-		Type:               p.Type,
-		InstructionCount:   uint32(len(p.Instructions)),
-		Instructions:       iptr(p.Instructions),
-		License:            bptr(nullTerminatedString(p.License)),
-		LogLevel:           p.LogLevel,
-		LogBufSize:         uint32(len(p.LogBuffer)),
-		LogBuf:             bptr(p.LogBuffer),
-		KernelVersion:      p.KernelVersion,
-		Flags:              p.Flags,
-		Name:               newObjectName(p.ObjectName),
-		IfIndex:            p.IfIndex,
+		Type:             p.Type,
+		InstructionCount: uint32(len(p.Instructions)),
+		Instructions:     iptr(p.Instructions),
+		License:          bptr(nullTerminatedString(p.License)),
+		LogLevel:         p.LogLevel,
+		LogBufSize:       uint32(len(p.LogBuffer)),
+		LogBuf:           bptr(p.LogBuffer),
+		KernelVersion:    p.KernelVersion,
+		Flags:            p.Flags,
+		Name:             newObjectName(p.ObjectName),
+		IfIndex:          p.IfIndex,
 	}
 	pfd := new(progFD)
 	if err := pfd.Init(&cfg); err != nil {
@@ -155,17 +155,17 @@ func (pfd *progFD) Close() error {
 }
 
 type progConfig struct {
-	Type               ProgType
-	InstructionCount   uint32
-	Instructions       u64ptr
-	License            u64ptr // pointer to null-terminated string
-	LogLevel           uint32
-	LogBufSize         uint32
-	LogBuf             u64ptr
-	KernelVersion      uint32
-	Flags              uint32
-	Name               objectName
-	IfIndex            uint32
+	Type             ProgType
+	InstructionCount uint32
+	Instructions     u64ptr
+	License          u64ptr // pointer to null-terminated string
+	LogLevel         uint32
+	LogBufSize       uint32
+	LogBuf           u64ptr
+	KernelVersion    uint32
+	Flags            uint32
+	Name             objectName
+	IfIndex          uint32
 
 	// TODO(acln): add ExpectedAttachType back
 }
