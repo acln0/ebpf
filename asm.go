@@ -246,7 +246,7 @@ const MaxInstructions = 4096
 
 // An Assembler assembles eBPF instructions.
 type Assembler struct {
-	insns []uint64
+	insns []RawInstruction
 }
 
 // Raw emits a raw instruction to the stream.
@@ -489,9 +489,9 @@ func (a *Assembler) Exit() {
 }
 
 // Assemble assembles the code and returns the raw instructions.
-func (a *Assembler) Assemble() []uint64 {
+func (a *Assembler) Assemble() []RawInstruction {
 	// Copy the instructions to avoid slice aliasing issues.
-	insns := make([]uint64, len(a.insns))
+	insns := make([]RawInstruction, len(a.insns))
 	copy(insns, a.insns)
 	return insns
 }
@@ -527,15 +527,13 @@ type Instruction struct {
 
 // Pack packs the Dst and Src fields into 4 bits each, and performs the
 // final assembly of the instruction, producing a RawInstruction.
-func (ri Instruction) Pack() uint64 {
-	// TODO(acln): is this correct on big endian systems?
-	var i uint64
-	i |= uint64(ri.Code) << 56
-	i |= uint64(ri.Dst) << 52
-	i |= uint64(ri.Src) << 48
-	i |= uint64(ri.Off) << 32
-	i |= uint64(ri.Imm)
-	return i
+func (i Instruction) Pack() RawInstruction {
+	return RawInstruction{
+		Code: i.Code,
+		Regs: uint8(i.Dst << 4) | uint8(i.Src),
+		Off: i.Off,
+		Imm: i.Imm,
+	}
 }
 
 // RawInstruction is an assembled eBPF instruction.

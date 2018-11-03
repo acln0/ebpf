@@ -73,3 +73,14 @@ func (a *Array) Set(i uint32, v []byte) error {
 func (a *Array) Close() error {
 	return a.m.Close()
 }
+
+// Sysfd is a horrible kludge that exists only temporarily. A better interface
+// should exist instead.
+//
+// TODO(acln): delete this as soon as possible.
+func (a *Array) Sysfd() int {
+	sysfd, _ := a.m.fd.Incref()
+	a.m.fd.Decref()
+
+	return sysfd
+}

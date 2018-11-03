@@ -100,3 +100,14 @@ func (h *Hashmap) Iterate(fn func(k, v []byte) (stop bool), startHint []byte) er
 func (h *Hashmap) Close() error {
 	return h.m.Close()
 }
+
+// Sysfd is a horrible kludge that exists only temporarily. A better interface
+// should exist instead.
+//
+// TODO(acln): delete this as soon as possible.
+func (h *Hashmap) Sysfd() int {
+	sysfd, _ := h.m.fd.Incref()
+	h.m.fd.Decref()
+
+	return sysfd
+}

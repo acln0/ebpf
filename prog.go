@@ -18,6 +18,8 @@ import (
 	"unsafe"
 
 	"acln.ro/rc"
+
+	"golang.org/x/sys/unix"
 )
 
 // ProgType is the type of an eBPF program.
@@ -112,6 +114,13 @@ func (p *Prog) Load() error {
 	return nil
 }
 
+// Attach attaches the program to a file descriptor.
+//
+// TODO(acln): this interface is not the best, fix it in the future
+func (p *Prog) Attach(fd int) error {
+	return p.pfd.Attach(fd)
+}
+
 // Unload unloads the program from the kernel and releases the associated
 // file descriptor.
 func (p *Prog) Unload() error {
@@ -129,6 +138,16 @@ func (pfd *progFD) Init(cfg *progConfig) error {
 		return err
 	}
 	return pfd.fd.Init(fd)
+}
+
+func (pfd *progFD) Attach(fd int) error {
+	sysfd, err := pfd.fd.Incref()
+	if err != nil {
+		return err
+	}
+	defer pfd.fd.Decref()
+
+	return unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_ATTACH_BPF, sysfd)
 }
 
 func (pfd *progFD) Close() error {
