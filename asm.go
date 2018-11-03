@@ -16,7 +16,7 @@ package ebpf
 
 // BUG(acln): all of this is very poorly documented
 
-// InstructionClass is a BPF instruction class.
+// InstructionClass is an eBPF instruction class.
 type InstructionClass uint8
 
 // Instruction classes.
@@ -27,12 +27,11 @@ const (
 	STX
 	ALU
 	JMP
-	RET          // unused in eBPF
-	MISC         // unused in eBPF
-	ALU64 = MISC // eBPF only
+	_ // RET in classic BPF, unused in eBPF
+	ALU64
 )
 
-// InstructionWidth specifies the width of a load / store.
+// InstructionWidth is the width of a load or store instruction.
 type InstructionWidth uint8
 
 // Instruction widths.
@@ -40,13 +39,13 @@ const (
 	W  InstructionWidth = iota << 3 // 32 bit
 	H                               // 16 bit
 	B                               // 8 bit
-	DW                              // 64 bit, eBPF only
+	DW                              // 64 bit
 )
 
-// AddressMode specifies the address mode for an instruction.
+// AddressMode is the addres mode of a load or store instruction.
 type AddressMode uint8
 
-// Valid ddress modes.
+// Valid address modes.
 const (
 	IMM AddressMode = iota << 5
 	ABS
@@ -99,19 +98,12 @@ const (
 	JSLE // eBPF only
 )
 
-// SourceOperand specifies the source operand for an instruction.
-type SourceOperand uint8
-
-// Source registers.
+// Source operands.
 const (
 	// K specifies the 32 bit immediate as the source operand.
-	//
-	// TODO(acln): document what it does for classic BPF.
-	K SourceOperand = iota << 3
+	K = iota << 3
 
 	// X specifies the source register as the source operand.
-	//
-	// TODO(acln): document what it does for classic BPF
 	X
 )
 
@@ -146,6 +138,14 @@ const (
 	PseudoCall Register = 1
 )
 
+// KernelFunction is a function callable by eBPF programs from inside the kernel.
+type KernelFunction int32
+
+// Kernel functions.
+const (
+// TODO(acln): add function call definitions.
+)
+
 // MaxInstructions is the maximum number of instructions in a BPF or eBPF program.
 const MaxInstructions = 4096
 
@@ -155,16 +155,16 @@ type Assembler struct {
 }
 
 // Raw emits a raw instruction to the stream.
-func (asm *Assembler) Raw(ri RawInstruction) {
-	asm.insns = append(asm.insns, ri.pack())
+func (a *Assembler) Raw(ins Instruction) {
+	a.insns = append(a.insns, ins.Pack())
 }
 
 // ALU64Reg emits a 64 bit ALU instruction on registers.
 //
 //     dst = dst <op> src
-func (asm *Assembler) ALU64Reg(op ALUOp, dst, src Register) {
-	asm.Raw(RawInstruction{
-		Code: alu64Code(op, X),
+func (a *Assembler) ALU64Reg(op ALUOp, dst, src Register) {
+	a.Raw(Instruction{
+		Code: uint8(ALU64) | uint8(op) | uint8(X),
 		Dst:  dst,
 		Src:  src,
 	})
@@ -172,61 +172,248 @@ func (asm *Assembler) ALU64Reg(op ALUOp, dst, src Register) {
 
 // ALU32Reg emits a 32 bit ALU instruction on registers. Schematically:
 //
-//     (uint32)dst = (uint32)dst <op> (uint32)src
-func (asm *Assembler) ALU32Reg(op ALUOp, dst, src Register) {
-	asm.Raw(RawInstruction{
-		Code: alu32Code(op, X),
+//     dst = int32(dst) <op> int32(src)
+//
+// After the operation, dst is zero-extended into 64-bit.
+func (a *Assembler) ALU32Reg(op ALUOp, dst, src Register) {
+	a.Raw(Instruction{
+		Code: uint8(ALU) | uint8(op) | uint8(X),
 		Dst:  dst,
 		Src:  src,
 	})
 }
 
-// ALU64Imm emits a 64 bit ALU instruction on a 32 bit immediate. Schematically:
+// ALU64Imm emits a 64 bit ALU instruction on a register and a 32 bit
+// immediate. Schematically:
 //
-//     dst = dst <op> (uint64)imm
-func (asm *Assembler) ALU64Imm(op ALUOp, dst Register, imm int32) {
-	asm.Raw(RawInstruction{
-		Code: alu64Code(op, K),
+//     dst = dst <op> int64(imm)
+func (a *Assembler) ALU64Imm(op ALUOp, dst Register, imm int32) {
+	a.Raw(Instruction{
+		Code: uint8(ALU64) | uint8(op) | uint8(K),
 		Dst:  dst,
 		Imm:  imm,
 	})
 }
 
-// ALU32Imm emits a 32 bit ALU instruction on a 32 bit immediate. Schematically:
+// ALU32Imm emits a 32 bit ALU instruction on a register and a 32 bit
+// immediate. Schematically:
 //
-//     (uint32)dst = (uint32)dst <op> imm
-func (asm *Assembler) ALU32Imm(op ALUOp, dst Register, imm int32) {
-	asm.Raw(RawInstruction{
-		Code: alu64Code(op, K),
+//     dst = int32(dst) <op> imm
+//
+// After the operation, dst is zero-extended into 64-bit.
+func (a *Assembler) ALU32Imm(op ALUOp, dst Register, imm int32) {
+	a.Raw(Instruction{
+		Code: uint8(ALU) | uint8(op) | uint8(K),
 		Dst:  dst,
 		Imm:  imm,
+	})
+}
+
+// Mov64Reg emits a move on 64-bit registers. Schematically:
+//
+//     dst = src
+func (a *Assembler) Mov64Reg(dst, src Register) {
+	a.Raw(Instruction{
+		Code: uint8(ALU64) | uint8(MOV) | uint8(X),
+		Dst:  dst,
+		Src:  src,
+	})
+}
+
+// Mov32Reg emits a move on 32-bit subregisters. Schematically:
+//
+//     dst = int32(src)
+//
+// After the operation, dst is zero-extended into 64-bit.
+func (a *Assembler) Mov32Reg(dst, src Register) {
+	a.Raw(Instruction{
+		Code: uint8(ALU) | uint8(MOV) | uint8(X),
+		Dst:  dst,
+		Src:  src,
+	})
+}
+
+// Mov64Imm emits a 64 bit move of a 32 bit immediate into a register.
+// Schematically:
+//
+//     dst = imm
+func (a *Assembler) Mov64Imm(dst Register, imm int32) {
+	a.Raw(Instruction{
+		Code: uint8(ALU64) | uint8(MOV) | uint8(K),
+		Dst:  dst,
+		Imm:  imm,
+	})
+}
+
+// Mov32Imm emits a move of a 32 bit immediate into a register.
+// Schematically:
+//
+//     dst = imm
+//
+// After the operation, dst is zero-extended into 64-bit.
+func (a *Assembler) Mov32Imm(dst Register, imm int32) {
+	a.Raw(Instruction{
+		Code: uint8(ALU) | uint8(MOV) | uint8(K),
+		Dst:  dst,
+		Imm:  imm,
+	})
+}
+
+// LoadImm64 emits the special 'load 64 bit immediate' instruction, which
+// loads a 64 bit immediate into dst.
+func (a *Assembler) LoadImm64(dst Register, imm uint64) {
+	a.loadImm64(dst, 0, imm)
+}
+
+// LoadMapFD loads a map file descriptor into dst.
+func (a *Assembler) LoadMapFD(dst Register, fd uint32) {
+	a.loadImm64(dst, PseudoMapFD, uint64(fd))
+}
+
+func (a *Assembler) loadImm64(dst, src Register, imm uint64) {
+	a.Raw(Instruction{
+		Code: uint8(LD) | uint8(DW) | uint8(IMM),
+		Dst:  dst,
+		Src:  src,
+		Imm:  int32(imm), // TODO(acln): is this correct?
+	})
+	a.Raw(Instruction{
+		Imm: int32(imm >> 32),
+	})
+}
+
+// LoadAbs emits the special 'direct packet access' instruction.
+// Schematically:
+//
+//     R0 = *(uintw *)(skb->data + imm)
+func (a *Assembler) LoadAbs(w InstructionWidth, imm int32) {
+	a.Raw(Instruction{
+		Code: uint8(LD) | uint8(w) | uint8(ABS),
+		Imm:  imm,
+	})
+}
+
+// MemLoad emits a memory load. Schematically:
+//
+//     dst = *(uintw *)(src + offset)
+func (a *Assembler) MemLoad(w InstructionWidth, dst, src Register, offset int16) {
+	a.Raw(Instruction{
+		Code: uint8(LDX) | uint8(w) | uint8(MEM),
+		Dst:  dst,
+		Src:  src,
+		Off:  offset,
+	})
+}
+
+// MemStoreReg emits a memory store from a register. Schematically:
+//
+//     *(uintw *)(dst + offset) = src
+func (a *Assembler) MemStoreReg(w InstructionWidth, dst, src Register, offset int16) {
+	a.Raw(Instruction{
+		Code: uint8(STX) | uint8(w) | uint8(MEM),
+		Dst:  dst,
+		Src:  src,
+		Off:  offset,
+	})
+}
+
+// MemStoreImm emits a memory store from an immediate. Schematically:
+//
+//     *(uintw *)(dst + offset) = imm
+func (a *Assembler) MemStoreImm(w InstructionWidth, dst Register, offset int16, imm int32) {
+	a.Raw(Instruction{
+		Code: uint8(STX) | uint8(w) | uint8(MEM),
+		Dst:  dst,
+		Off:  offset,
+		Imm:  imm,
+	})
+}
+
+// AtomicAdd64 emits a 64-bit atomic add to a memory location. Schematically:
+//
+//     *(uint64 *)(dst + offset) += src
+func (a *Assembler) AtomicAdd64(dst, src Register, offset int16) {
+	a.Raw(Instruction{
+		Code: uint8(STX) | uint8(DW) | uint8(XADD),
+		Dst:  dst,
+		Src:  src,
+		Off:  offset,
+	})
+}
+
+// AtomicAdd32 emits a 32-bit atomic add to a memory location. Schematically:
+//
+//     *(uint32 *)(dst + offset) += uint32(src)
+func (a *Assembler) AtomicAdd32(dst, src Register, offset int16) {
+	a.Raw(Instruction{
+		Code: uint8(STX) | uint8(W) | uint8(XADD),
+		Dst:  dst,
+		Src:  src,
+		Off:  offset,
+	})
+}
+
+// JumpReg emits a conditional jump against registers. Schematically:
+//
+//     if dst <op> src { goto pc + offset }
+func (a *Assembler) JumpReg(cond JumpCondition, dst, src Register, offset int16) {
+	a.Raw(Instruction{
+		Code: uint8(JMP) | uint8(cond) | uint8(X),
+		Dst:  dst,
+		Src:  src,
+		Off:  offset,
+	})
+}
+
+// JumpImm emits a conditional jump against an immediate. Schematically:
+//
+//     if dst <op> imm { goto pc + offset }
+func (a *Assembler) JumpImm(cond JumpCondition, dst Register, imm int32, offset int16) {
+	a.Raw(Instruction{
+		Code: uint8(JMP) | uint8(cond) | uint8(X),
+		Dst:  dst,
+		Off:  offset,
+		Imm:  imm,
+	})
+}
+
+// Call emits a function call instruction. Schematically:
+func (a *Assembler) Call(fn KernelFunction) {
+	a.Raw(Instruction{
+		Code: uint8(JMP) | uint8(CALL),
+		Imm:  int32(fn),
+	})
+}
+
+// Exit emits a program exit instruction.
+func (a *Assembler) Exit() {
+	a.Raw(Instruction{
+		Code: uint8(JMP) | uint8(EXIT),
 	})
 }
 
 // Assemble assembles the code and returns the raw instructions.
-func (asm *Assembler) Assemble() []uint64 {
+func (a *Assembler) Assemble() []uint64 {
 	// Copy the instructions to avoid slice aliasing issues.
-	insns := make([]uint64, len(asm.insns))
-	copy(insns, asm.insns)
+	insns := make([]uint64, len(a.insns))
+	copy(insns, a.insns)
 	return insns
 }
 
-func alu64Code(op ALUOp, operand SourceOperand) uint8 {
+func alu64Code(op ALUOp, operand uint8) uint8 {
 	return uint8(ALU64) | uint8(op) | uint8(operand)
 }
 
-func alu32Code(op ALUOp, operand SourceOperand) uint8 {
+func alu32Code(op ALUOp, operand uint8) uint8 {
 	return uint8(ALU) | uint8(op) | uint8(operand)
 }
 
-// RawInstruction specifies a raw eBPF instruction.
+// Instruction specifies a raw eBPF instruction.
 //
-// Note that RawInstruction does not pack the destination and source registers
+// Note that Instruction does not pack the destination and source registers
 // into a single 8 bit field.  Therefore, it is not suitable for passing
 // into the Linux kernel or an eBPF virtual machine directly.
-//
-// To obtain valid eBPF bytecode, use an Assembler.
-type RawInstruction struct {
+type Instruction struct {
 	// Code is the operation to execute.
 	Code uint8
 
@@ -242,9 +429,9 @@ type RawInstruction struct {
 	Imm int32
 }
 
-// pack packs the Dst and Src fields into 4 bits each, and performs the
-// final assembly of the instruction.
-func (ri RawInstruction) pack() uint64 {
+// Pack packs the Dst and Src fields into 4 bits each, and performs the
+// final assembly of the instruction, producing a RawInstruction.
+func (ri Instruction) Pack() uint64 {
 	// TODO(acln): is this correct on big endian systems?
 	var i uint64
 	i |= uint64(ri.Code) << 56
@@ -255,35 +442,10 @@ func (ri RawInstruction) pack() uint64 {
 	return i
 }
 
-// A ClassicAssembler assembles classic BPF bytecode.
-type ClassicAssembler struct {
-	insns []uint64
-}
-
-// Raw emits a raw instruction to the stream.
-func (casm *ClassicAssembler) Raw(rci RawClassicInstruction) {
-	casm.insns = append(casm.insns, rci.pack())
-}
-
-// RawClassicInstruction specifies a raw classic BPF instruction.
-type RawClassicInstruction struct {
-	// Op specifies the operation to execute.
-	Op uint16
-
-	// Jt and Jf specify, for conditional jump instructions, the number
-	// of instructions to skip if the condition is true and false,
-	// respectively.
-	Jt, Jf uint8
-
-	// K specifies the 32-bit immediate.
-	K uint32
-}
-
-func (rci RawClassicInstruction) pack() uint64 {
-	var i uint64
-	i |= uint64(rci.Op) << 48
-	i |= uint64(rci.Jt) << 40
-	i |= uint64(rci.Jf) << 32
-	i |= uint64(rci.K)
-	return i
+// RawInstruction is an assembled eBPF instruction.
+type RawInstruction struct {
+	Code uint8
+	Regs uint8
+	Off  int16
+	Imm  int32
 }
