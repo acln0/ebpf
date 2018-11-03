@@ -116,6 +116,9 @@ type objectName [16]byte
 // bytes. If s is longer than 15 bytes, tailing bytes are truncated.
 func newObjectName(s string) objectName {
 	var name objectName
+	if len(s) == 0 {
+		return name
+	}
 	n := copy(name[:], s)
 	name[n-1] = 0
 	return name
