@@ -238,7 +238,7 @@ func (pfd *progFD) Attach(sockFD int) error {
 
 func (pfd *progFD) Detach() error {
 	// TODO(acln): implement this
-	return nil
+	return errNotImplemented
 }
 
 func (pfd *progFD) RunTest(t Test) error {
