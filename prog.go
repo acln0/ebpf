@@ -168,8 +168,8 @@ func (p *Prog) AttachSocket(sock syscall.RawConn) error {
 	return err
 }
 
-// Attach attaches the program to a raw file descriptor, which must refer
-// to a socket.
+// AttachSocketFD attaches the program to a raw file descriptor, which must
+// refer to a socket.
 func (p *Prog) AttachSocketFD(sockFD int) error {
 	return p.pfd.Attach(sockFD)
 }
