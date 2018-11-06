@@ -1,7 +1,3 @@
-acln.ro/rc v0.1.0 h1:zx2BTvxaU+pmZ0PrI5QVdnH58BKHtmUH8koIN0LqNQ4=
-acln.ro/rc v0.1.0/go.mod h1:8jqb/sNHPvDZ8IyIgoiDk17x4D1zhvit4M39iKORNqU=
-acln.ro/rc v0.2.0 h1:Q7RXcsJhR2EHWsV3fAjwLaYWezus1h9LoSeO3+HJxVE=
-acln.ro/rc v0.2.0/go.mod h1:8jqb/sNHPvDZ8IyIgoiDk17x4D1zhvit4M39iKORNqU=
 acln.ro/rc v0.3.0 h1:7HwSKSVGZSa202fSocCuKeJnaiya6TmBxQX9haNPbuw=
 acln.ro/rc v0.3.0/go.mod h1:8jqb/sNHPvDZ8IyIgoiDk17x4D1zhvit4M39iKORNqU=
 golang.org/x/sys v0.0.0-20181031143558-9b800f95dbbc h1:SdCq5U4J+PpbSDIl9bM0V1e1Ug1jsnBkAFvTs1htn7U=
