@@ -80,38 +80,55 @@ type Prog struct {
 	Type               ProgType
 	Instructions       []RawInstruction
 	License            string
-	LogLevel           uint32
-	LogBuffer          []byte
 	KernelVersion      uint32
 	Flags              uint32
 	ObjectName         string
 	IfIndex            uint32
-	ExpectedAttachType uint32
+	ExpectedAttachType AttachType
 
 	pfd *progFD
 }
 
+// defaultLogBufSize is the log buffer size used by the Linux tools.
+// See tools/lib/bpf.h in the Linux kernel source tree. We use it as-is.
+// Perhaps it will be configurable one day.
+//
+// TODO(acln): configurable?
+const defaultLogBufSize = 256 * 1024
+
 // Load loads the program into the kernel.
-func (p *Prog) Load() error {
+//
+// If loading the program produces output from the eBPF kernel verifier,
+// the output is returned in the log string.
+func (p *Prog) Load() (log string, err error) {
+	logbuf := make([]byte, defaultLogBufSize)
 	cfg := progConfig{
-		Type:             p.Type,
-		InstructionCount: uint32(len(p.Instructions)),
-		Instructions:     iptr(p.Instructions),
-		License:          bptr(nullTerminatedString(p.License)),
-		LogLevel:         p.LogLevel,
-		LogBufSize:       uint32(len(p.LogBuffer)),
-		LogBuf:           bptr(p.LogBuffer),
-		KernelVersion:    p.KernelVersion,
-		Flags:            p.Flags,
-		Name:             newObjectName(p.ObjectName),
-		IfIndex:          p.IfIndex,
+		Type:               p.Type,
+		InstructionCount:   uint32(len(p.Instructions)),
+		Instructions:       iptr(p.Instructions),
+		License:            bptr(nullTerminatedString(p.License)),
+		LogLevel:           1,
+		LogBufSize:         uint32(len(logbuf)),
+		LogBuf:             bptr(logbuf),
+		KernelVersion:      p.KernelVersion,
+		Flags:              p.Flags,
+		Name:               newObjectName(p.ObjectName),
+		IfIndex:            p.IfIndex,
+		ExpectedAttachType: p.ExpectedAttachType,
 	}
 	pfd := new(progFD)
-	if err := pfd.Init(&cfg); err != nil {
-		return err
+	err = pfd.Init(&cfg)
+	for i := 0; i < len(logbuf); i++ {
+		if logbuf[i] == 0 {
+			log = string(logbuf[:i])
+			break
+		}
+	}
+	if err != nil {
+		return log, err
 	}
 	p.pfd = pfd
-	return nil
+	return log, nil
 }
 
 // Attach attaches the program to a file descriptor.
@@ -147,6 +164,8 @@ func (pfd *progFD) Attach(fd int) error {
 	}
 	defer pfd.fd.Decref()
 
+	// TODO(acln): is this right? If it is, then what is BPF_PROG_ATTACH for?
+
 	return unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_ATTACH_BPF, sysfd)
 }
 
@@ -155,19 +174,18 @@ func (pfd *progFD) Close() error {
 }
 
 type progConfig struct {
-	Type             ProgType
-	InstructionCount uint32
-	Instructions     u64ptr
-	License          u64ptr // pointer to null-terminated string
-	LogLevel         uint32
-	LogBufSize       uint32
-	LogBuf           u64ptr
-	KernelVersion    uint32
-	Flags            uint32
-	Name             objectName
-	IfIndex          uint32
-
-	// TODO(acln): add ExpectedAttachType back
+	Type               ProgType
+	InstructionCount   uint32
+	Instructions       u64ptr
+	License            u64ptr // pointer to null-terminated string
+	LogLevel           uint32
+	LogBufSize         uint32
+	LogBuf             u64ptr
+	KernelVersion      uint32
+	Flags              uint32
+	Name               objectName
+	IfIndex            uint32
+	ExpectedAttachType AttachType
 }
 
 func sysProgLoad(cfg *progConfig) (int, error) {
