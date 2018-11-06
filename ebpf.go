@@ -15,6 +15,7 @@
 package ebpf
 
 import (
+	"errors"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -108,6 +109,11 @@ func wrapSyscallError(cmd int, err error) error {
 	}
 	return &SyscallError{Cmd: commandString(cmd), Err: err}
 }
+
+// errNotImplemented signals that a feature is not implemented.
+//
+// TODO(acln): remove this when we no longer need it
+var errNotImplemented = errors.New("ebpf: not implemented")
 
 // objectName is a null-terminated string, at most 15 bytes long.
 type objectName [16]byte

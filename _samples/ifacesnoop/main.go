@@ -102,18 +102,19 @@ func main() {
 	}
 	instructions := assembleProgram(uint32(arr.Sysfd()))
 	prog := &ebpf.Prog{
-		Type:         ebpf.ProgTypeSocketFilter,
-		Instructions: instructions,
-		License:      "Dual Apache/GPL", // TODO(acln): is this right?
-		ObjectName:   "ifacesnoop_prog",
+		Type:            ebpf.ProgTypeSocketFilter,
+		Instructions:    instructions,
+		License:         "Dual Apache/GPL", // TODO(acln): is this right?
+		StrictAlignment: true,
+		ObjectName:      "ifacesnoop_prog",
 	}
 	loadLog, err := prog.Load()
 	log.Printf("load log: %s\n", loadLog)
 	if err != nil {
 		log.Fatalf("prog.Load(): %v", err)
 	}
-	if err := prog.Attach(sock); err != nil {
-		log.Fatalf("prog.Attach(): %v", err)
+	if err := prog.AttachSocketFD(sock); err != nil {
+		log.Fatalf("prog.AttachSocketFD(): %v", err)
 	}
 	var (
 		tcpCount  uint64

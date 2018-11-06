@@ -15,6 +15,8 @@
 package ebpf
 
 import (
+	"os"
+	"syscall"
 	"unsafe"
 
 	"acln.ro/rc"
@@ -81,7 +83,7 @@ type Prog struct {
 	Instructions       []RawInstruction
 	License            string
 	KernelVersion      uint32
-	Flags              uint32
+	StrictAlignment    bool
 	ObjectName         string
 	IfIndex            uint32
 	ExpectedAttachType AttachType
@@ -95,6 +97,27 @@ type Prog struct {
 //
 // TODO(acln): configurable?
 const defaultLogBufSize = 256 * 1024
+
+// BPF_PROG_LOAD flags.
+const loadStrictAlignment = 1 << 0
+
+// CGroupAttachFlag is a flag for an AttachCGroup operation.
+type CGroupAttachFlag uint32
+
+// cgroup attach flags.
+const (
+	// CGroupAttachAllowNone allows no further bpf programs in the target
+	// cgroup sub-tree.
+	CGroupAttachAllowNone CGroupAttachFlag = 0
+
+	// CGroupAttachAllowOverride arranges for the program in this cgroup
+	// to yield to programs installed by sub-cgroups.
+	CGroupAttachAllowOverride CGroupAttachFlag = 1 << 0
+
+	// CGroupAttachAllowMulti arranges for the program in this cgroup
+	// to run in addition to programs installed by sub-cgroups.
+	CGroupAttachAllowMulti CGroupAttachFlag = 1 << 1
+)
 
 // Load loads the program into the kernel.
 //
@@ -111,10 +134,12 @@ func (p *Prog) Load() (log string, err error) {
 		LogBufSize:         uint32(len(logbuf)),
 		LogBuf:             bptr(logbuf),
 		KernelVersion:      p.KernelVersion,
-		Flags:              p.Flags,
 		Name:               newObjectName(p.ObjectName),
 		IfIndex:            p.IfIndex,
 		ExpectedAttachType: p.ExpectedAttachType,
+	}
+	if p.StrictAlignment {
+		cfg.Flags = loadStrictAlignment
 	}
 	pfd := new(progFD)
 	err = pfd.Init(&cfg)
@@ -131,16 +156,56 @@ func (p *Prog) Load() (log string, err error) {
 	return log, nil
 }
 
-// Attach attaches the program to a file descriptor.
+// AttachSocket attaches the program to a socket.
+func (p *Prog) AttachSocket(sock syscall.RawConn) error {
+	var err error
+	cerr := sock.Control(func(fd uintptr) {
+		err = p.AttachSocketFD(int(fd))
+	})
+	if cerr != nil {
+		return cerr
+	}
+	return err
+}
+
+// Attach attaches the program to a raw file descriptor, which must refer
+// to a socket.
+func (p *Prog) AttachSocketFD(sockFD int) error {
+	return p.pfd.Attach(sockFD)
+}
+
+// AttachCGroup attaches the program to a control group.
 //
-// TODO(acln): this interface is not the best, fix it in the future
-func (p *Prog) Attach(fd int) error {
-	return p.pfd.Attach(fd)
+// TODO(acln): implement this
+func (p *Prog) AttachCGroup(fd int, typ AttachType, flag CGroupAttachFlag) error {
+	return errNotImplemented
+}
+
+// Detach detaches the program from the associated file descriptor. Most
+// programs don't need to call Detach explicitly, since it is called by
+// Unload.
+func (p *Prog) Detach() error {
+	return p.pfd.Detach()
+}
+
+// Test specifies a test run for an eBPF program.
+type Test struct {
+	Retval   uint32 // TODO(acln): what is this for?
+	Input    []byte
+	Output   []byte
+	Repeat   uint32
+	Duration uint32 // TODO(acln): what is this? ms? us? ns?
+}
+
+// RunTest tests the program, as specified by t.
+func (p *Prog) RunTest(t Test) error {
+	return p.pfd.RunTest(t)
 }
 
 // Unload unloads the program from the kernel and releases the associated
 // file descriptor.
 func (p *Prog) Unload() error {
+	p.Detach()
 	return p.pfd.Close()
 }
 
@@ -154,19 +219,46 @@ func (pfd *progFD) Init(cfg *progConfig) error {
 	if err != nil {
 		return err
 	}
-	return pfd.fd.Init(fd)
+	if err := pfd.fd.Init(fd); err != nil {
+		return err
+	}
+	// TODO(acln): what do we do about the attach type?
+	return nil
 }
 
-func (pfd *progFD) Attach(fd int) error {
+func (pfd *progFD) Attach(sockFD int) error {
 	sysfd, err := pfd.fd.Incref()
 	if err != nil {
 		return err
 	}
 	defer pfd.fd.Decref()
 
-	// TODO(acln): is this right? If it is, then what is BPF_PROG_ATTACH for?
+	return sysAttachToSocket(sockFD, sysfd)
+}
 
-	return unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_ATTACH_BPF, sysfd)
+func (pfd *progFD) Detach() error {
+	// TODO(acln): implement this
+	return nil
+}
+
+func (pfd *progFD) RunTest(t Test) error {
+	sysfd, err := pfd.fd.Incref()
+	if err != nil {
+		return err
+	}
+	defer pfd.fd.Decref()
+
+	params := progTestRunParams{
+		ProgFD:      uint32(sysfd),
+		Retval:      t.Retval,
+		DataSizeIn:  uint32(len(t.Input)),
+		DataSizeOut: uint32(len(t.Output)),
+		DataIn:      bptr(t.Input),
+		DataOut:     bptr(t.Output),
+		Repeat:      t.Repeat,
+		Duration:    t.Duration,
+	}
+	return sysProgTestRun(&params)
 }
 
 func (pfd *progFD) Close() error {
@@ -191,6 +283,48 @@ type progConfig struct {
 func sysProgLoad(cfg *progConfig) (int, error) {
 	fd, err := bpfFunc(cmdProgLoad, unsafe.Pointer(cfg), unsafe.Sizeof(*cfg))
 	return fd, wrapSyscallError(cmdProgLoad, err)
+}
+
+type progTestRunParams struct {
+	ProgFD      uint32
+	Retval      uint32 // TODO(acln): what is this?
+	DataSizeIn  uint32
+	DataSizeOut uint32
+	DataIn      u64ptr
+	DataOut     u64ptr
+	Repeat      uint32
+	Duration    uint32
+}
+
+func sysProgTestRun(cfg *progTestRunParams) error {
+	_, err := bpfFunc(cmdProgTestRun, unsafe.Pointer(cfg), unsafe.Sizeof(*cfg))
+	return wrapSyscallError(cmdProgTestRun, err)
+}
+
+type progAttachParams struct {
+	TargetFD uint32
+	ProgFD   uint32
+	Type     AttachType
+	Flags    CGroupAttachFlag
+}
+
+func sysProgAttach(cfg *progAttachParams) error {
+	_, err := bpfFunc(cmdProgAttach, unsafe.Pointer(cfg), unsafe.Sizeof(*cfg))
+	return wrapSyscallError(cmdProgAttach, err)
+}
+
+func sysAttachToSocket(sockFD int, progFD int) error {
+	const level = unix.SOL_SOCKET
+	const opt = unix.SO_ATTACH_BPF
+	err := unix.SetsockoptInt(sockFD, level, opt, progFD)
+	if err != nil {
+		// TODO(acln): find a better way than this
+		return &os.SyscallError{
+			Syscall: "setsockopt",
+			Err:     err,
+		}
+	}
+	return nil
 }
 
 func nullTerminatedString(s string) []byte {
