@@ -101,17 +101,14 @@ func main() {
 		log.Fatal(err)
 	}
 	instructions := assembleProgram(uint32(arr.Sysfd()))
-	logbuf := make([]byte, 128*1024)
 	prog := &ebpf.Prog{
 		Type:         ebpf.ProgTypeSocketFilter,
 		Instructions: instructions,
 		License:      "Dual Apache/GPL", // TODO(acln): is this right?
-		LogLevel:     1,
-		LogBuffer:    logbuf,
 		ObjectName:   "ifacesnoop_prog",
 	}
-	err = prog.Load()
-	log.Printf("load log: %s\n", logbuf)
+	loadLog, err := prog.Load()
+	log.Printf("load log: %s\n", loadLog)
 	if err != nil {
 		log.Fatalf("prog.Load(): %v", err)
 	}
