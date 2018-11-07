@@ -53,7 +53,7 @@ const (
 	MEM
 	LEN
 	MSH
-	XADD 
+	XADD
 )
 
 // ALUOp specifies an ALU operation.
@@ -72,9 +72,9 @@ const (
 	NEG
 	MOD
 	XOR
-	MOV  
-	ARSH 
-	END  
+	MOV
+	ARSH
+	END
 )
 
 // JumpCondition specifies a jump condition.
@@ -87,15 +87,15 @@ const (
 	JGT
 	JGE
 	JSET
-	JNE  
-	JSGT 
-	JSGE 
-	CALL 
-	EXIT 
-	JLT  
-	JLE  
-	JSLT 
-	JSLE 
+	JNE
+	JSGT
+	JSGE
+	CALL
+	EXIT
+	JLT
+	JLE
+	JSLT
+	JSLE
 )
 
 // Source operands.
