@@ -177,15 +177,9 @@ func (m *Map) Close() error {
 	return m.fd.Close()
 }
 
-// Sysfd is a horrible kludge that exists only temporarily. A better interface
-// should exist instead.
-//
-// TODO(acln): delete this as soon as possible.
-func (m *Map) Sysfd() int {
-	sysfd, _ := m.fd.fd.Incref()
-	m.fd.fd.Decref()
-
-	return sysfd
+// readFD stores the underlying file descriptor into fd.
+func (m *Map) readFD(fd *int) error {
+	return m.fd.ReadFD(fd)
 }
 
 // mapFD is a low level wrapper around a bpf map file descriptor.
@@ -285,6 +279,17 @@ func (m *mapFD) Iterate(fn func(k, v []byte) bool, startHint []byte) error {
 		}
 		copy(key, nextKey)
 	}
+}
+
+func (m *mapFD) ReadFD(fd *int) error {
+	sysfd, err := m.fd.Incref()
+	if err != nil {
+		return err
+	}
+	defer m.fd.Decref()
+
+	*fd = sysfd
+	return nil
 }
 
 func (m *mapFD) Close() error {

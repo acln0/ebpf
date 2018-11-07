@@ -360,8 +360,10 @@ func (a *Assembler) LoadImm64(dst Register, imm uint64) {
 	a.loadImm64(dst, 0, imm)
 }
 
-// LoadMapFD loads a map file descriptor into dst.
-func (a *Assembler) LoadMapFD(dst Register, fd uint32) {
+// LoadMapFD loads the file descriptor associated with m into dst.
+func (a *Assembler) LoadMapFD(dst Register, m *Map) {
+	var fd int
+	m.readFD(&fd) // TODO(acln): what do we do about the error?
 	a.loadImm64(dst, PseudoMapFD, uint64(fd))
 }
 
