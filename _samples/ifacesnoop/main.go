@@ -66,23 +66,6 @@ func rawSocket(ifaceName string) (fd int, err error) {
 	return sock, nil
 }
 
-func assembleProgram(mapFD uint32) []ebpf.RawInstruction {
-	var asm ebpf.Assembler
-	asm.Mov64Reg(ebpf.R6, ebpf.R1)                // R6 = R1
-	asm.LoadAbs(ebpf.B, offsetofIPHeader)         // R0 = ip->proto
-	asm.MemStoreReg(ebpf.W, ebpf.FP, ebpf.R0, -4) // store R0 to a slot on the stack
-	asm.Mov64Reg(ebpf.R2, ebpf.FP)                // R2 = FP
-	asm.ALU64Imm(ebpf.ADD, ebpf.R2, -4)           // R2 -= 4
-	asm.LoadMapFD(ebpf.R1, mapFD)                 // load pointer to map in R1
-	asm.Call(ebpf.MapLookupElem)                  // call bpf_map_lookup_elem
-	asm.JumpImm(ebpf.JEQ, ebpf.R0, 0, 2)          // if R0 == 0, pc += 2
-	asm.Mov64Imm(ebpf.R1, 1)                      // R1 = 1
-	asm.AtomicAdd64(ebpf.R0, ebpf.R1, 0)          // xadd R0 += R1
-	asm.Mov64Imm(ebpf.R0, 0)                      // R0 = 0
-	asm.Exit()                                    // return
-	return asm.Assemble()
-}
-
 func main() {
 	if len(os.Args) != 2 {
 		fmt.Println("usage: ifacesnoop [interface]")
@@ -102,10 +85,22 @@ func main() {
 	if err := arr.Init(); err != nil {
 		log.Fatal(err)
 	}
-	instructions := assembleProgram(uint32(arr.Sysfd()))
+	var asm ebpf.Assembler
+	asm.Mov64Reg(ebpf.R6, ebpf.R1)                // R6 = R1
+	asm.LoadAbs(ebpf.B, offsetofIPHeader)         // R0 = ip->proto
+	asm.MemStoreReg(ebpf.W, ebpf.FP, ebpf.R0, -4) // store R0 to a slot on the stack
+	asm.Mov64Reg(ebpf.R2, ebpf.FP)                // R2 = FP
+	asm.ALU64Imm(ebpf.ADD, ebpf.R2, -4)           // R2 -= 4
+	asm.LoadMapFD(ebpf.R1, arr)                   // load pointer to map in R1
+	asm.Call(ebpf.MapLookupElem)                  // call bpf_map_lookup_elem
+	asm.JumpImm(ebpf.JEQ, ebpf.R0, 0, 2)          // if R0 == 0, pc += 2
+	asm.Mov64Imm(ebpf.R1, 1)                      // R1 = 1
+	asm.AtomicAdd64(ebpf.R0, ebpf.R1, 0)          // xadd R0 += R1
+	asm.Mov64Imm(ebpf.R0, 0)                      // R0 = 0
+	asm.Exit()                                    // return
 	prog := &ebpf.Prog{
 		Type:            ebpf.ProgTypeSocketFilter,
-		Instructions:    instructions,
+		Instructions:    asm.Assemble(),
 		License:         "ISC", // TODO(acln): is this right?
 		StrictAlignment: true,
 		ObjectName:      "ifacesnoop_prog",
