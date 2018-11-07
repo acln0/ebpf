@@ -53,7 +53,7 @@ const (
 	MEM
 	LEN
 	MSH
-	XADD // eBPF only
+	XADD 
 )
 
 // ALUOp specifies an ALU operation.
@@ -72,9 +72,9 @@ const (
 	NEG
 	MOD
 	XOR
-	MOV  // eBPF only
-	ARSH // eBPF only
-	END  // eBPF only
+	MOV  
+	ARSH 
+	END  
 )
 
 // JumpCondition specifies a jump condition.
@@ -87,15 +87,15 @@ const (
 	JGT
 	JGE
 	JSET
-	JNE  // eBPF only
-	JSGT // eBPF only
-	JSGE // eBPF only
-	CALL // eBPF only
-	EXIT // eBPF only
-	JLT  // eBPF only
-	JLE  // eBPF only
-	JSLT // eBPF only
-	JSLE // eBPF only
+	JNE  
+	JSGT 
+	JSGE 
+	CALL 
+	EXIT 
+	JLT  
+	JLE  
+	JSLT 
+	JSLE 
 )
 
 // Source operands.
