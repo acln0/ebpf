@@ -92,10 +92,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("rawSocket: %v", err)
 	}
-	arr := &ebpf.Array{
-		NumElements: 256,
-		ValueSize:   8,
-		ObjectName:  "ifacesnoop_arr",
+	arr := &ebpf.Map{
+		Type:       ebpf.MapArray,
+		KeySize:    4,
+		ValueSize:  8,
+		MaxEntries: 256,
+		ObjectName: "ifacesnoop_arr",
 	}
 	if err := arr.Init(); err != nil {
 		log.Fatal(err)
@@ -116,19 +118,18 @@ func main() {
 	if err := prog.AttachSocketFD(sock); err != nil {
 		log.Fatalf("prog.AttachSocketFD(): %v", err)
 	}
-	var (
-		tcpCount  uint64
-		udpCount  uint64
-		icmpCount uint64
-	)
+	var tcpCount, udpCount, icmpCount uint64
 	for i := 0; i < 1000; i++ {
-		if err := arr.Lookup(unix.IPPROTO_TCP, uint64b(&tcpCount)); err != nil {
+		key := uint32(unix.IPPROTO_TCP)
+		if err := arr.Lookup(uint32b(&key), uint64b(&tcpCount)); err != nil {
 			log.Fatal(err)
 		}
-		if err := arr.Lookup(unix.IPPROTO_UDP, uint64b(&udpCount)); err != nil {
+		key = unix.IPPROTO_UDP
+		if err := arr.Lookup(uint32b(&key), uint64b(&udpCount)); err != nil {
 			log.Fatal(err)
 		}
-		if err := arr.Lookup(unix.IPPROTO_ICMP, uint64b(&icmpCount)); err != nil {
+		key = unix.IPPROTO_ICMP
+		if err := arr.Lookup(uint32b(&key), uint64b(&icmpCount)); err != nil {
 			log.Fatal(err)
 		}
 		fmt.Printf("TCP: %d, UDP: %d, ICMP: %d\n", tcpCount, udpCount, icmpCount)
@@ -136,6 +137,12 @@ func main() {
 	}
 }
 
-func uint64b(i *uint64) []byte {
-	return (*[8]byte)(unsafe.Pointer(i))[:]
+func uint32b(v *uint32) []byte {
+	const size = unsafe.Sizeof(*v)
+	return (*[size]byte)(unsafe.Pointer(v))[:]
+}
+
+func uint64b(v *uint64) []byte {
+	const size = unsafe.Sizeof(*v)
+	return (*[size]byte)(unsafe.Pointer(v))[:]
 }
