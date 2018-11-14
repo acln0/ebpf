@@ -75,37 +75,45 @@ func main() {
 	if err != nil {
 		log.Fatalf("rawSocket: %v", err)
 	}
+	arrName := "ifacesnoop_arr"
 	arr := &ebpf.Map{
 		Type:       ebpf.MapArray,
 		KeySize:    4,
 		ValueSize:  8,
 		MaxEntries: 256,
-		ObjectName: "ifacesnoop_arr",
+		ObjectName: arrName,
 	}
 	if err := arr.Init(); err != nil {
 		log.Fatal(err)
 	}
-	var asm ebpf.Assembler
-	asm.Mov64Reg(ebpf.R6, ebpf.R1)                // R6 = R1
-	asm.LoadAbs(ebpf.B, offsetofIPHeader)         // R0 = ip->proto
-	asm.MemStoreReg(ebpf.W, ebpf.FP, ebpf.R0, -4) // store R0 to a slot on the stack
-	asm.Mov64Reg(ebpf.R2, ebpf.FP)                // R2 = FP
-	asm.ALU64Imm(ebpf.ADD, ebpf.R2, -4)           // R2 -= 4
-	asm.LoadMapFD(ebpf.R1, arr)                   // load pointer to map in R1
-	asm.Call(ebpf.MapLookupElem)                  // call bpf_map_lookup_elem
-	asm.JumpImm(ebpf.JEQ, ebpf.R0, 0, 2)          // if R0 == 0, pc += 2
-	asm.Mov64Imm(ebpf.R1, 1)                      // R1 = 1
-	asm.AtomicAdd64(ebpf.R0, ebpf.R1, 0)          // xadd R0 += R1
-	asm.Mov64Imm(ebpf.R0, 0)                      // R0 = 0
-	asm.Exit()                                    // return
+	s := ebpf.NewInstructionStream()
+	s.Mov64Reg(ebpf.R6, ebpf.R1)                // r6 = r1
+	s.LoadAbs(ebpf.B, offsetofIPHeader)         // r0 = ip->proto
+	s.MemStoreReg(ebpf.W, ebpf.FP, ebpf.R0, -4) // store r0 to a slot on the stack
+	s.Mov64Reg(ebpf.R2, ebpf.FP)                // r2 = fp
+	s.ALU64Imm(ebpf.ADD, ebpf.R2, -4)           // r2 -= 4
+	s.LoadMapFD(ebpf.R1, arrName)               // load pointer to map in r1
+	s.Call(ebpf.MapLookupElem)                  // call bpf_map_lookup_elem
+	s.JumpImm(ebpf.JEQ, ebpf.R0, 0, 2)          // if r0 == 0, pc += 2
+	s.Mov64Imm(ebpf.R1, 1)                      // r1 = 1
+	s.AtomicAdd64(ebpf.R0, ebpf.R1, 0)          // xadd r0 += R1
+	s.Mov64Imm(ebpf.R0, 0)                      // r0 = 0
+	s.Exit()                                    // return
+	symtab := &ebpf.SymbolTable{
+		Maps: map[string]*ebpf.Map{
+			arrName: arr,
+		},
+	}
+	if err := s.Resolve(symtab); err != nil {
+		log.Fatal(err)
+	}
 	prog := &ebpf.Prog{
 		Type:            ebpf.ProgTypeSocketFilter,
-		Instructions:    asm.Assemble(),
-		License:         "ISC", // TODO(acln): is this right?
+		License:         "ISC",
 		StrictAlignment: true,
 		ObjectName:      "ifacesnoop_prog",
 	}
-	loadLog, err := prog.Load()
+	loadLog, err := prog.Load(s)
 	log.Printf("load log: %s\n", loadLog)
 	if err != nil {
 		log.Fatalf("prog.Load(): %v", err)

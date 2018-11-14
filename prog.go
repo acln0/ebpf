@@ -15,6 +15,7 @@
 package ebpf
 
 import (
+	"errors"
 	"os"
 	"syscall"
 	"unsafe"
@@ -80,7 +81,6 @@ const (
 // Prog configures an eBPF program.
 type Prog struct {
 	Type               ProgType
-	Instructions       []RawInstruction
 	License            string
 	KernelVersion      uint32
 	StrictAlignment    bool
@@ -119,16 +119,27 @@ const (
 	CGroupAttachAllowMulti CGroupAttachFlag = 1 << 1
 )
 
-// Load loads the program into the kernel.
+// Load attaches the specified InstructionStream to the Prog
+// and loads the program into the kernel.
+//
+// If the specified InstructionStream uses symbols, all symbols must
+// be resolved before calling Load.
 //
 // If loading the program produces output from the eBPF kernel verifier,
 // the output is returned in the log string.
-func (p *Prog) Load() (log string, err error) {
+func (p *Prog) Load(s *InstructionStream) (log string, err error) {
+	if s.empty() {
+		return "", errors.New("ebpf: empty instruction stream")
+	}
+	if s.hasUnresolvedSymbols() {
+		return "", errors.New("ebpf: unresolved symbols in instruction stream")
+	}
+	insns := s.instructions()
 	logbuf := make([]byte, defaultLogBufSize)
 	cfg := progConfig{
 		Type:               p.Type,
-		InstructionCount:   uint32(len(p.Instructions)),
-		Instructions:       iptr(p.Instructions),
+		InstructionCount:   uint32(len(insns)),
+		Instructions:       iptr(insns),
 		License:            bptr(nullTerminatedString(p.License)),
 		LogLevel:           1,
 		LogBufSize:         uint32(len(logbuf)),
@@ -333,6 +344,6 @@ func nullTerminatedString(s string) []byte {
 	return b
 }
 
-func iptr(insns []RawInstruction) u64ptr {
+func iptr(insns []rawInstruction) u64ptr {
 	return u64ptr{p: unsafe.Pointer(&insns[0])}
 }
