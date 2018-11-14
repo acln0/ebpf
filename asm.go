@@ -17,7 +17,24 @@ package ebpf
 import (
 	"encoding/binary"
 	"fmt"
+	"unsafe"
 )
+
+var (
+	hostByteOrder binary.ByteOrder
+)
+
+func init() {
+	var buf [2]byte
+	u16ptr := (*uint16)(unsafe.Pointer(&buf[0]))
+	*u16ptr = 0x1234
+	switch buf[0] {
+	case 0x12:
+		hostByteOrder = binary.BigEndian
+	case 0x34:
+		hostByteOrder = binary.LittleEndian
+	}
+}
 
 // BUG(acln): all of this is very poorly documented
 
@@ -427,13 +444,6 @@ const (
 // MaxInstructions is the maximum number of instructions in a BPF or eBPF program.
 const MaxInstructions = 4096
 
-// SymbolTable is a symbol table for an eBPF program.
-type SymbolTable struct {
-	Maps  map[string]*Map
-	Imm32 map[string]int32
-	Imm64 map[string]int64
-}
-
 // UnresolvedSymbolError captures an unresolved symbol in an instruction stream.
 //
 // TODO(acln): document this
@@ -449,25 +459,41 @@ func (e *UnresolvedSymbolError) Error() string {
 		e.Kind, e.Name, e.Opcode, e.Index)
 }
 
-// InstructionStream is a stream of eBPF instructions.
+// InstructionStream is a stream of eBPF instructions. The zero value is an
+// empty InstructionStream which produces instructions in host byte order.
 type InstructionStream struct {
-	bo          binary.ByteOrder
+	ByteOrder binary.ByteOrder // defaults to host byte order
+
 	insns       []rawInstruction
-	mapFDsyms   map[string]int
-	imm64syms   map[string]int
-	imm32syms   map[string]int
+	mapFDsyms   map[string][]int
+	imm64syms   map[string][]int
+	imm32syms   map[string][]int
 	usesSymbols bool
 	resolved    bool
 }
 
-// NewInstructionStream constructs an empty instruction stream.
-func NewInstructionStream() *InstructionStream {
-	return &InstructionStream{
-		bo:        binary.LittleEndian, // TODO(acln): don't hard-code this
-		mapFDsyms: make(map[string]int),
-		imm64syms: make(map[string]int),
-		imm32syms: make(map[string]int),
+func (s *InstructionStream) addMapFDSym(name string, index int) {
+	if s.mapFDsyms == nil {
+		s.mapFDsyms = make(map[string][]int)
 	}
+	s.mapFDsyms[name] = append(s.mapFDsyms[name], index)
+	s.usesSymbols = true
+}
+
+func (s *InstructionStream) addImm32Sym(name string, index int) {
+	if s.imm32syms == nil {
+		s.imm32syms = make(map[string][]int)
+	}
+	s.imm32syms[name] = append(s.imm32syms[name], index)
+	s.usesSymbols = true
+}
+
+func (s *InstructionStream) addImm64Sym(name string, index int) {
+	if s.imm64syms == nil {
+		s.imm64syms = make(map[string][]int)
+	}
+	s.imm64syms[name] = append(s.imm64syms[name], index)
+	s.usesSymbols = true
 }
 
 func (s *InstructionStream) empty() bool {
@@ -484,65 +510,83 @@ func (s *InstructionStream) instructions() []rawInstruction {
 	return insns
 }
 
+func (s *InstructionStream) byteOrder() binary.ByteOrder {
+	if s.ByteOrder != nil {
+		return s.ByteOrder
+	}
+	return hostByteOrder
+}
+
+// SymbolTable is a symbol table for an eBPF program.
+type SymbolTable struct {
+	Maps  map[string]*Map
+	Imm32 map[string]int32
+	Imm64 map[string]int64
+}
+
 // Resolve matches unresolved symbols in the instruction stream against a
 // symbol table.
 //
 // TODO(acln): document this more precisely
 func (s *InstructionStream) Resolve(symtab *SymbolTable) error {
-	for name, index := range s.mapFDsyms {
+	for name, indices := range s.mapFDsyms {
 		m, ok := symtab.Maps[name]
 		if !ok {
 			return &UnresolvedSymbolError{
 				Kind:   "map FD",
 				Name:   name,
-				Opcode: Opcode(s.insns[index].Code),
-				Index:  index,
+				Opcode: Opcode(s.insns[indices[0]].Code),
+				Index:  indices[0],
 			}
 		}
 		var fd int
 		if err := m.readFD(&fd); err != nil {
 			return err
 		}
-		s.insns[index].Imm = int32(fd)
+		for _, index := range indices {
+			s.insns[index].Imm = int32(fd)
+		}
 	}
-	for name, index := range s.imm32syms {
+	for name, indices := range s.imm32syms {
 		imm, ok := symtab.Imm32[name]
 		if !ok {
 			return &UnresolvedSymbolError{
 				Kind:   "imm32",
 				Name:   name,
-				Opcode: Opcode(s.insns[index].Code),
-				Index:  index,
+				Opcode: Opcode(s.insns[indices[0]].Code),
+				Index:  indices[0],
 			}
 		}
-		s.insns[index].Imm = imm
+		for _, index := range indices {
+			s.insns[index].Imm = imm
+		}
 	}
-	for name, index := range s.imm64syms {
+	for name, indices := range s.imm64syms {
 		imm, ok := symtab.Imm64[name]
 		if !ok {
 			return &UnresolvedSymbolError{
 				Kind:   "imm64",
 				Name:   name,
-				Opcode: Opcode(s.insns[index].Code),
-				Index:  index,
+				Opcode: Opcode(s.insns[indices[0]].Code),
+				Index:  indices[0],
 			}
 		}
-		s.insns[index].Imm = int32(imm)
-		s.insns[index+1].Imm = int32(imm >> 32)
+		for _, index := range indices {
+			s.insns[index].Imm = int32(imm)
+			s.insns[index+1].Imm = int32(imm >> 32)
+		}
 	}
 	s.resolved = true
 	return nil
 }
 
 func (s *InstructionStream) raw(ins instruction) {
-	s.insns = append(s.insns, ins.pack(s.bo))
+	s.insns = append(s.insns, ins.pack(s.byteOrder()))
 }
 
 func (s *InstructionStream) rawImm32Sym(sym string, ins instruction) {
-	s.usesSymbols = true
-	idx := len(s.insns)
 	s.raw(ins)
-	s.imm32syms[sym] = idx
+	s.addImm32Sym(sym, len(s.insns)-1)
 }
 
 // Raw emits a raw instruction.
@@ -839,29 +883,25 @@ func (s *InstructionStream) LoadImm64(dst Register, imm int64) {
 //
 // dst = $sym
 func (s *InstructionStream) LoadImm64Sym(dst Register, sym string) {
-	s.usesSymbols = true
-	idx := len(s.insns)
 	s.raw(instruction{
 		Code: memOpcode(LD, DW, IMM),
 		Dst:  dst,
 	})
 	s.raw(instruction{})
-	s.imm64syms[sym] = idx
+	s.addImm64Sym(sym, len(s.insns)-2)
 }
 
 // LoadMapFD emits the special 'load map file descriptor' instruction.
 //
 // dst = ptr_to_map_fd($mapName)
 func (s *InstructionStream) LoadMapFD(dst Register, mapName string) {
-	s.usesSymbols = true
-	idx := len(s.insns)
 	s.raw(instruction{
 		Code: memOpcode(LD, DW, IMM),
 		Dst:  dst,
 		Src:  PseudoMapFD,
 	})
 	s.raw(instruction{})
-	s.mapFDsyms[mapName] = idx
+	s.addMapFDSym(mapName, len(s.insns)-2)
 }
 
 // LoadAbs emits the special "direct packet access" instruction.

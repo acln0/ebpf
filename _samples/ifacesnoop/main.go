@@ -86,7 +86,7 @@ func main() {
 	if err := arr.Init(); err != nil {
 		log.Fatal(err)
 	}
-	s := ebpf.NewInstructionStream()
+	var s ebpf.InstructionStream
 	s.Mov64Reg(ebpf.R6, ebpf.R1)                // r6 = r1
 	s.LoadAbs(ebpf.B, offsetofIPHeader)         // r0 = ip->proto
 	s.MemStoreReg(ebpf.W, ebpf.FP, ebpf.R0, -4) // store r0 to a slot on the stack
@@ -113,7 +113,7 @@ func main() {
 		StrictAlignment: true,
 		ObjectName:      "ifacesnoop_prog",
 	}
-	loadLog, err := prog.Load(s)
+	loadLog, err := prog.Load(&s)
 	log.Printf("load log: %s\n", loadLog)
 	if err != nil {
 		log.Fatalf("prog.Load(): %v", err)
