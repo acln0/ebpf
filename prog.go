@@ -353,6 +353,6 @@ func nullTerminatedString(s string) []byte {
 	return b
 }
 
-func iptr(insns []rawInstruction) u64ptr {
+func iptr(insns []instruction) u64ptr {
 	return u64ptr{p: unsafe.Pointer(&insns[0])}
 }

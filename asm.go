@@ -20,9 +20,7 @@ import (
 	"unsafe"
 )
 
-var (
-	hostByteOrder binary.ByteOrder
-)
+var hostByteOrder binary.ByteOrder
 
 func init() {
 	var buf [2]byte
@@ -35,8 +33,6 @@ func init() {
 		hostByteOrder = binary.LittleEndian
 	}
 }
-
-// BUG(acln): all of this is very poorly documented
 
 // Opcode is an eBPF opcode.
 type Opcode uint8
@@ -68,6 +64,11 @@ func (o Opcode) ALUOp() ALUOp {
 // if o.Class() is JMP.
 func (o Opcode) JumpCond() JumpCond {
 	return JumpCond(o & jumpCondMask)
+}
+
+func (o Opcode) String() string {
+	// TODO(acln): how does this relate to Instruction.String()?
+	return errNotImplemented.Error()
 }
 
 // Class is an eBPF instruction class.
@@ -310,7 +311,7 @@ const (
 	FP = R10
 
 	// PseudoMapFD is used to specify a map file descriptor
-	// for loading, in a 64-bit immediate load instruction.
+	// for loading, in a 64 bit immediate load instruction.
 	PseudoMapFD Register = 1
 
 	// PseudoCall is used to specify a kernel function to call,
@@ -444,56 +445,98 @@ const (
 // MaxInstructions is the maximum number of instructions in a BPF or eBPF program.
 const MaxInstructions = 4096
 
-// UnresolvedSymbolError captures an unresolved symbol in an instruction stream.
+// Instruction is an eBPF instruction.
 //
-// TODO(acln): document this
-type UnresolvedSymbolError struct {
-	Kind   string
-	Name   string
+// Note that Instruction does not pack the destination and source registers
+// into a single 8 bit field, as the kernel ABI demands. This means that
+// Instruction values are not suitable for loading into the kernel.
+type Instruction struct {
 	Opcode Opcode
-	Index  int
+	Dst    Register
+	Src    Register
+	Off    int16
+	Imm    int32
 }
 
-func (e *UnresolvedSymbolError) Error() string {
-	return fmt.Sprintf("epbf: unresolved %s symbol %q for %v instruction at index %d",
-		e.Kind, e.Name, e.Opcode, e.Index)
+func (ins Instruction) pack(bo binary.ByteOrder) instruction {
+	i := instruction{
+		Opcode: uint8(ins.Opcode),
+		Off:    ins.Off,
+		Imm:    ins.Imm,
+	}
+	switch bo {
+	case binary.LittleEndian:
+		i.Registers = uint8(ins.Src<<4) | uint8(ins.Dst)
+	case binary.BigEndian:
+		i.Registers = uint8(ins.Dst<<4) | uint8(ins.Src)
+	default:
+		panic("ebpf: bad byte order: want binary.LittleEndian or binary.BigEndian")
+	}
+	return i
+}
+
+func (ins Instruction) String() string {
+	// TODO(acln): consult the clang and Linux kernel tools, then implement this in a compatible format
+	return errNotImplemented.Error()
+}
+
+// instruction is an assembled eBPF instruction, suitable for passing
+// into the Linux kernel.
+type instruction struct {
+	Opcode    uint8
+	Registers uint8
+	Off       int16
+	Imm       int32
+}
+
+func (i instruction) unpack(bo binary.ByteOrder) Instruction {
+	ins := Instruction{
+		Opcode: Opcode(i.Opcode),
+		Off:    i.Off,
+		Imm:    i.Imm,
+	}
+	switch bo {
+	case binary.LittleEndian:
+		ins.Dst = Register(i.Registers & 0x0f)
+		ins.Src = Register(i.Registers >> 4)
+	case binary.BigEndian:
+		ins.Dst = Register(i.Registers >> 4)
+		ins.Src = Register(i.Registers & 0x0f)
+	default:
+		panic("ebpf: bad byte order: want binary.LittleEndian or binary.BigEndian")
+	}
+	return ins
 }
 
 // InstructionStream is a stream of eBPF instructions. The zero value is an
-// empty InstructionStream which produces instructions in host byte order.
+// empty InstructionStream which assembles instructions in host byte order.
+//
+// After instructions on 32 bit subregisters, the destination register is
+// zero extended into 64 bits.
+//
+// Comments on InstructionStream methods which emit instructions may contain
+// pseudocode that loosely describes the semantics of the instruction. The
+// conventions are the following:
+//
+// "$sym" means the value represented by the symbol, after it is resolved.
+//
+// "uintsz" represents an unsigned integer, with size given by the sz
+// parameter.
 type InstructionStream struct {
-	ByteOrder binary.ByteOrder // defaults to host byte order
+	// ByteOrder is the byte order to produce instructions for.
+	//
+	// If it is nil, it defaults to the host byte order.
+	//
+	// If set, it must be one of binary.LittleEndian or binary.BigEndian,
+	// otherwise method calls on the InstructionStream will panic.
+	ByteOrder binary.ByteOrder
 
-	insns       []rawInstruction
-	mapFDsyms   map[string][]int
-	imm64syms   map[string][]int
-	imm32syms   map[string][]int
+	insns       []instruction
+	mapSyms     map[string][]int
+	imm64Syms   map[string][]int
+	imm32Syms   map[string][]int
 	usesSymbols bool
 	resolved    bool
-}
-
-func (s *InstructionStream) addMapFDSym(name string, index int) {
-	if s.mapFDsyms == nil {
-		s.mapFDsyms = make(map[string][]int)
-	}
-	s.mapFDsyms[name] = append(s.mapFDsyms[name], index)
-	s.usesSymbols = true
-}
-
-func (s *InstructionStream) addImm32Sym(name string, index int) {
-	if s.imm32syms == nil {
-		s.imm32syms = make(map[string][]int)
-	}
-	s.imm32syms[name] = append(s.imm32syms[name], index)
-	s.usesSymbols = true
-}
-
-func (s *InstructionStream) addImm64Sym(name string, index int) {
-	if s.imm64syms == nil {
-		s.imm64syms = make(map[string][]int)
-	}
-	s.imm64syms[name] = append(s.imm64syms[name], index)
-	s.usesSymbols = true
 }
 
 func (s *InstructionStream) empty() bool {
@@ -501,11 +544,15 @@ func (s *InstructionStream) empty() bool {
 }
 
 func (s *InstructionStream) hasUnresolvedSymbols() bool {
-	return s.usesSymbols && !s.resolved
+	if s.usesSymbols {
+		return !s.resolved
+	}
+	return false
 }
 
-func (s *InstructionStream) instructions() []rawInstruction {
-	insns := make([]rawInstruction, len(s.insns))
+func (s *InstructionStream) instructions() []instruction {
+	// Make a copy, to avoid aliasing surprises.
+	insns := make([]instruction, len(s.insns))
 	copy(insns, s.insns)
 	return insns
 }
@@ -517,102 +564,23 @@ func (s *InstructionStream) byteOrder() binary.ByteOrder {
 	return hostByteOrder
 }
 
-// SymbolTable is a symbol table for an eBPF program.
-type SymbolTable struct {
-	Maps  map[string]*Map
-	Imm32 map[string]int32
-	Imm64 map[string]int64
-}
-
-// Resolve matches unresolved symbols in the instruction stream against a
-// symbol table.
-//
-// TODO(acln): document this more precisely
-func (s *InstructionStream) Resolve(symtab *SymbolTable) error {
-	for name, indices := range s.mapFDsyms {
-		m, ok := symtab.Maps[name]
-		if !ok {
-			return &UnresolvedSymbolError{
-				Kind:   "map FD",
-				Name:   name,
-				Opcode: Opcode(s.insns[indices[0]].Code),
-				Index:  indices[0],
-			}
-		}
-		var fd int
-		if err := m.readFD(&fd); err != nil {
-			return err
-		}
-		for _, index := range indices {
-			s.insns[index].Imm = int32(fd)
-		}
-	}
-	for name, indices := range s.imm32syms {
-		imm, ok := symtab.Imm32[name]
-		if !ok {
-			return &UnresolvedSymbolError{
-				Kind:   "imm32",
-				Name:   name,
-				Opcode: Opcode(s.insns[indices[0]].Code),
-				Index:  indices[0],
-			}
-		}
-		for _, index := range indices {
-			s.insns[index].Imm = imm
-		}
-	}
-	for name, indices := range s.imm64syms {
-		imm, ok := symtab.Imm64[name]
-		if !ok {
-			return &UnresolvedSymbolError{
-				Kind:   "imm64",
-				Name:   name,
-				Opcode: Opcode(s.insns[indices[0]].Code),
-				Index:  indices[0],
-			}
-		}
-		for _, index := range indices {
-			s.insns[index].Imm = int32(imm)
-			s.insns[index+1].Imm = int32(imm >> 32)
-		}
-	}
-	s.resolved = true
-	return nil
-}
-
-func (s *InstructionStream) raw(ins instruction) {
+// Raw emits a raw instruction.
+func (s *InstructionStream) Raw(ins Instruction) {
 	s.insns = append(s.insns, ins.pack(s.byteOrder()))
 }
 
-func (s *InstructionStream) rawImm32Sym(sym string, ins instruction) {
-	s.raw(ins)
+// RawSym emits a raw instruction with a symbolic 32 bit immediate. ins.Imm is ignored.
+func (s *InstructionStream) RawSym(ins Instruction, sym string) {
+	// We ignore ins.Imm, but there is no need to overwrite it here,
+	// or do anything else to it. If sym does not resolve, we can't load
+	// the program anyway.
+	s.Raw(ins)
 	s.addImm32Sym(sym, len(s.insns)-1)
-}
-
-// Raw emits a raw instruction.
-func (s *InstructionStream) Raw(code Opcode, dst, src Register, off int16, imm int32) {
-	s.raw(instruction{
-		Code: code,
-		Dst:  dst,
-		Src:  src,
-		Off:  off,
-		Imm:  imm,
-	})
-}
-
-// RawSym emits a raw instruction with a symbolic 32 bit immediate.
-func (s *InstructionStream) RawSym(code Opcode, dst, src Register, off int16, sym string) {
-	s.rawImm32Sym(sym, instruction{
-		Code: code,
-		Dst:  dst,
-		Src:  src,
-		Off:  off,
-	})
 }
 
 // 64 bit MOVs and ALU operations.
 
-func alu64Code(op ALUOp, operand SourceOperand) Opcode {
+func alu64Opcode(op ALUOp, operand SourceOperand) Opcode {
 	return Opcode(ALU64) | Opcode(op) | Opcode(operand)
 }
 
@@ -620,10 +588,10 @@ func alu64Code(op ALUOp, operand SourceOperand) Opcode {
 //
 // dst = src
 func (s *InstructionStream) Mov64Reg(dst, src Register) {
-	s.raw(instruction{
-		Code: alu64Code(MOV, X),
-		Dst:  dst,
-		Src:  src,
+	s.Raw(Instruction{
+		Opcode: alu64Opcode(MOV, X),
+		Dst:    dst,
+		Src:    src,
 	})
 }
 
@@ -631,10 +599,10 @@ func (s *InstructionStream) Mov64Reg(dst, src Register) {
 //
 // dst = imm
 func (s *InstructionStream) Mov64Imm(dst Register, imm int32) {
-	s.raw(instruction{
-		Code: alu64Code(MOV, K),
-		Dst:  dst,
-		Imm:  imm,
+	s.Raw(Instruction{
+		Opcode: alu64Opcode(MOV, K),
+		Dst:    dst,
+		Imm:    imm,
 	})
 }
 
@@ -643,20 +611,20 @@ func (s *InstructionStream) Mov64Imm(dst Register, imm int32) {
 //
 // dst = $sym
 func (s *InstructionStream) Mov64Sym(dst Register, sym string) {
-	s.rawImm32Sym(sym, instruction{
-		Code: alu64Code(MOV, K),
-		Dst:  dst,
-	})
+	s.RawSym(Instruction{
+		Opcode: alu64Opcode(MOV, K),
+		Dst:    dst,
+	}, sym)
 }
 
 // ALU64Reg emits a 64 bit ALU operation on registers.
 //
 // dst = dst <op> src
 func (s *InstructionStream) ALU64Reg(op ALUOp, dst, src Register) {
-	s.raw(instruction{
-		Code: alu64Code(op, X),
-		Dst:  dst,
-		Src:  src,
+	s.Raw(Instruction{
+		Opcode: alu64Opcode(op, X),
+		Dst:    dst,
+		Src:    src,
 	})
 }
 
@@ -665,10 +633,10 @@ func (s *InstructionStream) ALU64Reg(op ALUOp, dst, src Register) {
 //
 // dst = dst <op> imm
 func (s *InstructionStream) ALU64Imm(op ALUOp, dst Register, imm int32) {
-	s.raw(instruction{
-		Code: alu64Code(op, K),
-		Dst:  dst,
-		Imm:  imm,
+	s.Raw(Instruction{
+		Opcode: alu64Opcode(op, K),
+		Dst:    dst,
+		Imm:    imm,
 	})
 }
 
@@ -677,41 +645,37 @@ func (s *InstructionStream) ALU64Imm(op ALUOp, dst Register, imm int32) {
 //
 // dst = dst <op> $sym
 func (s *InstructionStream) ALU64Sym(op ALUOp, dst Register, sym string) {
-	s.rawImm32Sym(sym, instruction{
-		Code: alu64Code(op, K),
-		Dst:  dst,
-	})
+	s.RawSym(Instruction{
+		Opcode: alu64Opcode(op, K),
+		Dst:    dst,
+	}, sym)
 }
 
 // 32 bit MOVs and ALU operations
 
-func alu32Code(op ALUOp, operand SourceOperand) Opcode {
+func alu32Opcode(op ALUOp, operand SourceOperand) Opcode {
 	return Opcode(ALU) | Opcode(op) | Opcode(operand)
 }
 
 // Mov32Reg emits a move on 32 bit subregisters.
 //
 // dst = int32(src)
-//
-// After the operation, dst is zero-extended into 64 bit.
 func (s *InstructionStream) Mov32Reg(dst, src Register) {
-	s.raw(instruction{
-		Code: alu32Code(MOV, X),
-		Dst:  dst,
-		Src:  src,
+	s.Raw(Instruction{
+		Opcode: alu32Opcode(MOV, X),
+		Dst:    dst,
+		Src:    src,
 	})
 }
 
 // Mov32Imm emits a move of a 32 bit immediate into a register.
 //
 // dst = imm
-//
-// After the operation, dst is zero extended into 64 bit.
 func (s *InstructionStream) Mov32Imm(dst Register, imm int32) {
-	s.raw(instruction{
-		Code: alu32Code(MOV, K),
-		Dst:  dst,
-		Imm:  imm,
+	s.Raw(Instruction{
+		Opcode: alu32Opcode(MOV, K),
+		Dst:    dst,
+		Imm:    imm,
 	})
 }
 
@@ -719,25 +683,21 @@ func (s *InstructionStream) Mov32Imm(dst Register, imm int32) {
 // register.
 //
 // dst = $sym
-//
-// After the operation, dst is zero extended into 64 bit.
 func (s *InstructionStream) Mov32Sym(dst Register, sym string) {
-	s.rawImm32Sym(sym, instruction{
-		Code: alu32Code(MOV, K),
-		Dst:  dst,
-	})
+	s.RawSym(Instruction{
+		Opcode: alu32Opcode(MOV, K),
+		Dst:    dst,
+	}, sym)
 }
 
 // ALU32Reg emits a 32 bit ALU operation on registers.
 //
 // dst = dst <op> src
-//
-// After the operation, dst is zero-extended into 64 bit.
 func (s *InstructionStream) ALU32Reg(op ALUOp, dst, src Register) {
-	s.raw(instruction{
-		Code: alu32Code(op, X),
-		Dst:  dst,
-		Src:  src,
+	s.Raw(Instruction{
+		Opcode: alu32Opcode(op, X),
+		Dst:    dst,
+		Src:    src,
 	})
 }
 
@@ -745,13 +705,11 @@ func (s *InstructionStream) ALU32Reg(op ALUOp, dst, src Register) {
 // immediate.
 //
 // dst = int32(dst) <op> imm
-//
-// After the operation, dst is zero-extended into 64 bit.
 func (s *InstructionStream) ALU32Imm(op ALUOp, dst Register, imm int32) {
-	s.raw(instruction{
-		Code: alu32Code(op, K),
-		Dst:  dst,
-		Imm:  imm,
+	s.Raw(Instruction{
+		Opcode: alu32Opcode(op, K),
+		Dst:    dst,
+		Imm:    imm,
 	})
 }
 
@@ -759,13 +717,11 @@ func (s *InstructionStream) ALU32Imm(op ALUOp, dst Register, imm int32) {
 // symbolic immediate.
 //
 // dst = int32(dst) <op> $sym
-//
-// After the operation, dst is zero-extended into 64 bit.
 func (s *InstructionStream) ALU32Sym(op ALUOp, dst Register, sym string) {
-	s.rawImm32Sym(sym, instruction{
-		Code: alu32Code(op, K),
-		Dst:  dst,
-	})
+	s.RawSym(Instruction{
+		Opcode: alu32Opcode(op, K),
+		Dst:    dst,
+	}, sym)
 }
 
 // Memory loads and stores.
@@ -776,49 +732,49 @@ func memOpcode(class Class, size Size, mode Mode) Opcode {
 
 // MemLoad emids a memory load.
 //
-// dst = *(uints *)(src + off)
+// dst = *(uintsz *)(src + off)
 func (s *InstructionStream) MemLoad(sz Size, dst, src Register, off int16) {
-	s.raw(instruction{
-		Code: memOpcode(LDX, sz, MEM),
-		Dst:  dst,
-		Src:  src,
-		Off:  off,
+	s.Raw(Instruction{
+		Opcode: memOpcode(LDX, sz, MEM),
+		Dst:    dst,
+		Src:    src,
+		Off:    off,
 	})
 }
 
 // MemStoreReg emits a memory store from a register.
 //
-// *(uints *)(dst + offset) = src
+// *(uintsz *)(dst + off) = src
 func (s *InstructionStream) MemStoreReg(sz Size, dst, src Register, off int16) {
-	s.raw(instruction{
-		Code: memOpcode(STX, sz, MEM),
-		Dst:  dst,
-		Src:  src,
-		Off:  off,
+	s.Raw(Instruction{
+		Opcode: memOpcode(STX, sz, MEM),
+		Dst:    dst,
+		Src:    src,
+		Off:    off,
 	})
 }
 
 // MemStoreImm emits a memory store from a 32 bit immediate.
 //
-// *(uints *)(dst + offset) = imm
+// *(uintsz *)(dst + off) = imm
 func (s *InstructionStream) MemStoreImm(sz Size, dst Register, off int16, imm int32) {
-	s.raw(instruction{
-		Code: memOpcode(STX, sz, MEM), // TODO(acln): investigate this
-		Dst:  dst,
-		Off:  off,
-		Imm:  imm,
+	s.Raw(Instruction{
+		Opcode: memOpcode(STX, sz, MEM), // TODO(acln): investigate this
+		Dst:    dst,
+		Off:    off,
+		Imm:    imm,
 	})
 }
 
 // MemStoreSym emits a memory store from a 32 bit symbolic immediate.
 //
-// *(uints *)(dst + offset) = $sym
+// *(uintsz *)(dst + off) = $sym
 func (s *InstructionStream) MemStoreSym(sz Size, dst Register, off int16, sym string) {
-	s.rawImm32Sym(sym, instruction{
-		Code: memOpcode(STX, sz, MEM), // TODO(acln): investigate this
-		Dst:  dst,
-		Off:  off,
-	})
+	s.RawSym(Instruction{
+		Opcode: memOpcode(STX, sz, MEM), // TODO(acln): investigate this
+		Dst:    dst,
+		Off:    off,
+	}, sym)
 }
 
 // Conditional jumps.
@@ -831,11 +787,11 @@ func jumpOpcode(cond JumpCond, operand SourceOperand) Opcode {
 //
 // if dst <op> src { goto pc + off }
 func (s *InstructionStream) JumpReg(cond JumpCond, dst, src Register, off int16) {
-	s.raw(instruction{
-		Code: jumpOpcode(cond, X),
-		Dst:  dst,
-		Src:  src,
-		Off:  off,
+	s.Raw(Instruction{
+		Opcode: jumpOpcode(cond, X),
+		Dst:    dst,
+		Src:    src,
+		Off:    off,
 	})
 }
 
@@ -843,11 +799,11 @@ func (s *InstructionStream) JumpReg(cond JumpCond, dst, src Register, off int16)
 //
 // if dst <op> imm { goto pc + off }
 func (s *InstructionStream) JumpImm(cond JumpCond, dst Register, imm int32, off int16) {
-	s.raw(instruction{
-		Code: jumpOpcode(cond, K),
-		Dst:  dst,
-		Off:  off,
-		Imm:  imm,
+	s.Raw(Instruction{
+		Opcode: jumpOpcode(cond, K),
+		Dst:    dst,
+		Off:    off,
+		Imm:    imm,
 	})
 }
 
@@ -855,11 +811,11 @@ func (s *InstructionStream) JumpImm(cond JumpCond, dst Register, imm int32, off 
 //
 // if dst <op> $sym { goto pc + off }
 func (s *InstructionStream) JumpSym(cond JumpCond, dst Register, sym string, off int16) {
-	s.rawImm32Sym(sym, instruction{
-		Code: jumpOpcode(cond, K),
-		Dst:  dst,
-		Off:  off,
-	})
+	s.RawSym(Instruction{
+		Opcode: jumpOpcode(cond, K),
+		Dst:    dst,
+		Off:    off,
+	}, sym)
 }
 
 // Special instructions.
@@ -868,12 +824,12 @@ func (s *InstructionStream) JumpSym(cond JumpCond, dst Register, sym string, off
 //
 // dst = imm
 func (s *InstructionStream) LoadImm64(dst Register, imm int64) {
-	s.raw(instruction{
-		Code: memOpcode(LD, DW, IMM),
-		Dst:  dst,
-		Imm:  int32(imm),
+	s.Raw(Instruction{
+		Opcode: memOpcode(LD, DW, IMM),
+		Dst:    dst,
+		Imm:    int32(imm),
 	})
-	s.raw(instruction{
+	s.Raw(Instruction{
 		Imm: int32(imm >> 32),
 	})
 }
@@ -883,11 +839,11 @@ func (s *InstructionStream) LoadImm64(dst Register, imm int64) {
 //
 // dst = $sym
 func (s *InstructionStream) LoadImm64Sym(dst Register, sym string) {
-	s.raw(instruction{
-		Code: memOpcode(LD, DW, IMM),
-		Dst:  dst,
+	s.Raw(Instruction{
+		Opcode: memOpcode(LD, DW, IMM),
+		Dst:    dst,
 	})
-	s.raw(instruction{})
+	s.Raw(Instruction{})
 	s.addImm64Sym(sym, len(s.insns)-2)
 }
 
@@ -895,44 +851,44 @@ func (s *InstructionStream) LoadImm64Sym(dst Register, sym string) {
 //
 // dst = ptr_to_map_fd($mapName)
 func (s *InstructionStream) LoadMapFD(dst Register, mapName string) {
-	s.raw(instruction{
-		Code: memOpcode(LD, DW, IMM),
-		Dst:  dst,
-		Src:  PseudoMapFD,
+	s.Raw(Instruction{
+		Opcode: memOpcode(LD, DW, IMM),
+		Dst:    dst,
+		Src:    PseudoMapFD,
 	})
-	s.raw(instruction{})
-	s.addMapFDSym(mapName, len(s.insns)-2)
+	s.Raw(Instruction{})
+	s.addMapSym(mapName, len(s.insns)-2)
 }
 
 // LoadAbs emits the special "direct packet access" instruction.
 //
-// r0 = *(uints *)(skb->data + imm)
+// r0 = *(uintsz *)(skb->data + imm)
 func (s *InstructionStream) LoadAbs(sz Size, imm int32) {
-	s.raw(instruction{
-		Code: memOpcode(LD, sz, ABS),
-		Imm:  imm,
+	s.Raw(Instruction{
+		Opcode: memOpcode(LD, sz, ABS),
+		Imm:    imm,
 	})
 }
 
 // LoadAbsSym emits the special "direct packet access" instruction,
 // with a symbolic immediate.
 //
-// r0 = *(uints *)(skb->data + $sym)
+// r0 = *(uintsz *)(skb->data + $sym)
 func (s *InstructionStream) LoadAbsSym(sz Size, sym string) {
-	s.rawImm32Sym(sym, instruction{
-		Code: memOpcode(LD, sz, ABS),
-	})
+	s.RawSym(Instruction{
+		Opcode: memOpcode(LD, sz, ABS),
+	}, sym)
 }
 
 // AtomicAdd64 emits a 64 bit atomic add to a memory location.
 //
 // *(uint64 *)(dst + off) += src
 func (s *InstructionStream) AtomicAdd64(dst, src Register, off int16) {
-	s.raw(instruction{
-		Code: memOpcode(STX, DW, XADD),
-		Dst:  dst,
-		Src:  src,
-		Off:  off,
+	s.Raw(Instruction{
+		Opcode: memOpcode(STX, DW, XADD),
+		Dst:    dst,
+		Src:    src,
+		Off:    off,
 	})
 }
 
@@ -940,56 +896,176 @@ func (s *InstructionStream) AtomicAdd64(dst, src Register, off int16) {
 //
 // *(uint32 *)(dst + off) += src
 func (s *InstructionStream) AtomicAdd32(dst, src Register, off int16) {
-	s.raw(instruction{
-		Code: memOpcode(STX, W, XADD),
-		Dst:  dst,
-		Src:  src,
-		Off:  off,
+	s.Raw(Instruction{
+		Opcode: memOpcode(STX, W, XADD),
+		Dst:    dst,
+		Src:    src,
+		Off:    off,
 	})
 }
 
 // Call emits a kernel function call instruction.
 func (s *InstructionStream) Call(fn KernelFunc) {
-	s.raw(instruction{
-		Code: Opcode(JMP) | Opcode(CALL),
-		Imm:  int32(fn),
+	s.Raw(Instruction{
+		Opcode: Opcode(JMP) | Opcode(CALL),
+		Imm:    int32(fn),
 	})
 }
 
 // Exit emits a program exit instruction.
 func (s *InstructionStream) Exit() {
-	s.raw(instruction{
-		Code: Opcode(JMP) | Opcode(EXIT),
+	s.Raw(Instruction{
+		Opcode: Opcode(JMP) | Opcode(EXIT),
 	})
 }
 
-// BUG(acln): there is no exported instruction type, and no way to print instructions yet. We will need this when we add support for loading code from ELF files.
+// Symbol handling routines.
 
-type instruction struct {
-	Code Opcode
-	Dst  Register
-	Src  Register
-	Off  int16
-	Imm  int32
+// SymbolTable is a symbol table for an eBPF program.
+type SymbolTable struct {
+	// Maps contains eBPF maps. Symbol names are derived from the
+	// ObjectName fields, which must be unique across all maps in the
+	// collection.
+	Maps []*Map
+
+	// Imm32 maps symbol names to 32 bit immediate values.
+	Imm32 map[string]int32
+
+	// Imm64 maps symbol names to 64 bit immediate values.
+	Imm64 map[string]int64
 }
 
-func (ins instruction) pack(bo binary.ByteOrder) rawInstruction {
-	ri := rawInstruction{
-		Code: uint8(ins.Code),
-		Off:  ins.Off,
-		Imm:  ins.Imm,
+// Resolve resolves symbols in the instruction stream using the specified
+// symbol table.
+//
+// If a symbol referenced by the instruction stream is not found in the
+// symbol table, Resolve returns an UnresolvedSymbolError, and the instruction
+// stream cannot be assembled and loaded into the kernel.
+func (s *InstructionStream) Resolve(symtab *SymbolTable) error {
+	mapsByName := map[string]*Map{}
+	for _, m := range symtab.Maps {
+		mapsByName[m.ObjectName] = m
 	}
-	if bo == binary.LittleEndian {
-		ri.Regs = uint8(ins.Src<<4) | uint8(ins.Dst)
-	} else {
-		ri.Regs = uint8(ins.Dst<<4) | uint8(ins.Src)
+	if err := s.resolveMapSyms(mapsByName); err != nil {
+		return err
 	}
-	return ri
+	if err := s.resolveImm32Syms(symtab.Imm32); err != nil {
+		return err
+	}
+	if err := s.resolveImm64Syms(symtab.Imm64); err != nil {
+		return err
+	}
+	s.resolved = true
+	return nil
 }
 
-type rawInstruction struct {
-	Code uint8
-	Regs uint8
-	Off  int16
-	Imm  int32
+// UnresolvedSymbolError captures an unresolved symbol in an instruction
+// stream.
+type UnresolvedSymbolError struct {
+	// Kind is the kind of the symbol: "map", "imm32" or "imm64".
+	Kind string
+
+	// Name is the name of the symbol.
+	Name string
+
+	// Opcode is the opcode of the first instruction that references
+	// the symbol.
+	Opcode Opcode
+
+	// Index is the index (in the instruction stream) of the first
+	// instruction that references the symbol.
+	Index int
+}
+
+func (e *UnresolvedSymbolError) Error() string {
+	return fmt.Sprintf("epbf: unresolved %s symbol %q for %v instruction at index %d",
+		e.Kind, e.Name, e.Opcode, e.Index)
+}
+
+func (s *InstructionStream) resolveMapSyms(maps map[string]*Map) error {
+	for name, indices := range s.mapSyms {
+		m, ok := maps[name]
+		if !ok {
+			return &UnresolvedSymbolError{
+				Kind:   "map",
+				Name:   name,
+				Opcode: Opcode(s.insns[indices[0]].Opcode),
+				Index:  indices[0],
+			}
+		}
+		var fd int
+		if err := m.readFD(&fd); err != nil {
+			// The map isn't valid. Nothing to do but bail out.
+			// TODO(acln): annotate this more?
+			return err
+		}
+		for _, index := range indices {
+			// TODO(acln): is this correct? investigate
+			s.insns[index].Imm = int32(fd)
+			s.insns[index+1].Imm = int32(fd >> 32)
+		}
+	}
+	return nil
+}
+
+func (s *InstructionStream) resolveImm32Syms(values map[string]int32) error {
+	for name, indices := range s.imm32Syms {
+		imm, ok := values[name]
+		if !ok {
+			return &UnresolvedSymbolError{
+				Kind:   "imm32",
+				Name:   name,
+				Opcode: Opcode(s.insns[indices[0]].Opcode),
+				Index:  indices[0],
+			}
+		}
+		for _, index := range indices {
+			s.insns[index].Imm = imm
+		}
+	}
+	return nil
+}
+
+func (s *InstructionStream) resolveImm64Syms(values map[string]int64) error {
+	for name, indices := range s.imm64Syms {
+		imm, ok := values[name]
+		if !ok {
+			return &UnresolvedSymbolError{
+				Kind:   "imm64",
+				Name:   name,
+				Opcode: Opcode(s.insns[indices[0]].Opcode),
+				Index:  indices[0],
+			}
+		}
+		for _, index := range indices {
+			// TODO(acln): is this correct? investigate
+			s.insns[index].Imm = int32(imm)
+			s.insns[index+1].Imm = int32(imm >> 32)
+		}
+	}
+	return nil
+}
+
+func (s *InstructionStream) addMapSym(name string, index int) {
+	if s.mapSyms == nil {
+		s.mapSyms = make(map[string][]int)
+	}
+	s.mapSyms[name] = append(s.mapSyms[name], index)
+	s.usesSymbols = true
+}
+
+func (s *InstructionStream) addImm32Sym(name string, index int) {
+	if s.imm32Syms == nil {
+		s.imm32Syms = make(map[string][]int)
+	}
+	s.imm32Syms[name] = append(s.imm32Syms[name], index)
+	s.usesSymbols = true
+}
+
+func (s *InstructionStream) addImm64Sym(name string, index int) {
+	if s.imm64Syms == nil {
+		s.imm64Syms = make(map[string][]int)
+	}
+	s.imm64Syms[name] = append(s.imm64Syms[name], index)
+	s.usesSymbols = true
 }

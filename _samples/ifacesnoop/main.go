@@ -100,9 +100,7 @@ func main() {
 	s.Mov64Imm(ebpf.R0, 0)                      // r0 = 0
 	s.Exit()                                    // return
 	symtab := &ebpf.SymbolTable{
-		Maps: map[string]*ebpf.Map{
-			arrName: arr,
-		},
+		Maps: []*ebpf.Map{arr},
 	}
 	if err := s.Resolve(symtab); err != nil {
 		log.Fatal(err)
