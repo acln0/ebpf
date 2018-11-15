@@ -17,7 +17,6 @@ package ebpf
 import (
 	"errors"
 	"os"
-	"syscall"
 	"unsafe"
 
 	"acln.ro/rc"
@@ -167,22 +166,32 @@ func (p *Prog) Load(s *InstructionStream) (log string, err error) {
 	return log, nil
 }
 
+// Socket represents a socket an eBPF program can be attached to.
+//
+// Note that implementations of syscall.RawConn also satisfy Socket.
+type Socket interface {
+	Control(fn func(fd uintptr)) error
+}
+
+// RawSocketFD is an implementation of Socket that uses a raw file descriptor.
+type RawSocketFD int
+
+// Control calls fn on raw. It always returns nil.
+func (raw RawSocketFD) Control(fn func(fd uintptr)) error {
+	fn(uintptr(raw))
+	return nil
+}
+
 // AttachSocket attaches the program to a socket.
-func (p *Prog) AttachSocket(sock syscall.RawConn) error {
+func (p *Prog) AttachSocket(sock Socket) error {
 	var err error
 	cerr := sock.Control(func(fd uintptr) {
-		err = p.AttachSocketFD(int(fd))
+		err = p.pfd.Attach(int(fd))
 	})
 	if cerr != nil {
 		return cerr
 	}
 	return err
-}
-
-// AttachSocketFD attaches the program to a raw file descriptor, which must
-// refer to a socket.
-func (p *Prog) AttachSocketFD(sockFD int) error {
-	return p.pfd.Attach(sockFD)
 }
 
 // AttachCGroup attaches the program to a control group.

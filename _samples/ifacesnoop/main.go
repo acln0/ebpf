@@ -118,7 +118,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("prog.Load(): %v", err)
 	}
-	if err := prog.AttachSocketFD(sock); err != nil {
+	if err := prog.AttachSocket(ebpf.RawSocketFD(sock)); err != nil {
 		log.Fatalf("prog.AttachSocketFD(): %v", err)
 	}
 	var tcpCount, udpCount, icmpCount uint64
