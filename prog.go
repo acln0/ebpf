@@ -182,12 +182,14 @@ func (raw RawSocketFD) Control(fn func(fd uintptr)) error {
 	return nil
 }
 
+var errProgNotLoaded = errors.New("ebpf: program not loaded")
+
 // AttachToSocket attaches the program to a socket.
 //
 // It sets the SO_ATTACH_BPF option, at the SOL_SOCKET level.
 func (p *Prog) AttachToSocket(sock Socket) error {
 	if p.pfd == nil {
-		return errors.New("ebpf: program not loaded")
+		return errProgNotLoaded
 	}
 	var err error
 	cerr := sock.Control(func(fd uintptr) {
@@ -209,7 +211,7 @@ func (p *Prog) AttachToCGroup(fd int, typ AttachType, flag CGroupAttachFlag) err
 // DetachFromSocket detaches the program from the specified socket.
 func (p *Prog) DetachFromSocket(sock Socket) error {
 	if p.pfd == nil {
-		return errors.New("ebpf: program not loaded")
+		return errProgNotLoaded
 	}
 	var err error
 	cerr := sock.Control(func(fd uintptr) {
@@ -232,12 +234,18 @@ type Test struct {
 
 // RunTest tests the program, as specified by t.
 func (p *Prog) RunTest(t Test) error {
+	if p.pfd == nil {
+		return errProgNotLoaded
+	}
 	return p.pfd.RunTest(t)
 }
 
 // Unload unloads the program from the kernel and releases the associated
 // file descriptor.
 func (p *Prog) Unload() error {
+	if p.pfd == nil {
+		return errProgNotLoaded
+	}
 	return p.pfd.Close()
 }
 

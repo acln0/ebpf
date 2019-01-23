@@ -127,15 +127,23 @@ func (m *Map) Init() error {
 	return nil
 }
 
+var errUninitializedMap = errors.New("ebpf: use of uninitialized map")
+
 // Lookup looks up the value for k and stores it in v. If k is not found
 // in the map, Lookup returns an error such that IsNotExist(err) == true.
 func (m *Map) Lookup(k, v []byte) error {
+	if m.fd == nil {
+		return errUninitializedMap
+	}
 	return wrapMapOpError("lookup", m.fd.Lookup(k, v))
 }
 
 // Set sets the value for k to v. If an entry for k exists in the map,
 // it will be overwritten.
 func (m *Map) Set(k, v []byte) error {
+	if m.fd == nil {
+		return errUninitializedMap
+	}
 	return wrapMapOpError("set", m.fd.Update(k, v, mapUpdateAny))
 }
 
@@ -143,18 +151,27 @@ func (m *Map) Set(k, v []byte) error {
 // If an entry for k exists in the map, Create returns an error such that
 // IsExist(err) == true.
 func (m *Map) Create(k, v []byte) error {
+	if m.fd == nil {
+		return errUninitializedMap
+	}
 	return wrapMapOpError("create", m.fd.Update(k, v, mapUpdateNoexist))
 }
 
 // Update updates the entry for k to v. If an entry for k does not exist in
 // the map, Update returns an error such that IsNotExist(err) == true.
 func (m *Map) Update(k, v []byte) error {
+	if m.fd == nil {
+		return errUninitializedMap
+	}
 	return wrapMapOpError("update", m.fd.Update(k, v, mapUpdateExist))
 }
 
 // Delete deletes the entry for k. If an entry for k does not exist in the
 // map, Delete returns an error such that IsNotExist(err) == true.
 func (m *Map) Delete(k []byte) error {
+	if m.fd == nil {
+		return errUninitializedMap
+	}
 	return wrapMapOpError("delete", m.fd.Delete(k))
 }
 
@@ -168,17 +185,26 @@ func (m *Map) Delete(k []byte) error {
 // requires a non-nil startHint. On Linux >= 4.12, startHint may be nil, but
 // it is recommended to pass a valid one nevertheless.
 func (m *Map) Iterate(fn func(k, v []byte) (stop bool), startHint []byte) error {
+	if m.fd == nil {
+		return errUninitializedMap
+	}
 	return wrapMapOpError("iterate", m.fd.Iterate(fn, startHint))
 }
 
 // Close destroys the map and releases the associated file descriptor. After a call
 // to Close, future method calls on the Map will return errors.
 func (m *Map) Close() error {
+	if m.fd == nil {
+		return errUninitializedMap
+	}
 	return m.fd.Close()
 }
 
 // readFD stores the underlying file descriptor into fd.
 func (m *Map) readFD(fd *int) error {
+	if m.fd == nil {
+		return errUninitializedMap
+	}
 	return m.fd.ReadFD(fd)
 }
 
