@@ -223,21 +223,44 @@ func (p *Prog) DetachFromSocket(sock Socket) error {
 	return err
 }
 
-// Test specifies a test run for an eBPF program.
-type Test struct {
-	Retval   uint32 // TODO(acln): what is this for?
-	Input    []byte
-	Output   []byte
-	Repeat   uint32
-	Duration uint32 // TODO(acln): what is this? ms? us? ns?
+// TestRun specifies a test run for an eBPF program.
+type TestRun struct {
+	// Input contains the input for the eBPF program.
+	Input []byte
+
+	// Output is the memory area where the output of the
+	// program will be stored.
+	//
+	// TODO(acln): document the ENOSPC
+	Output []byte
+
+	// Repeat configures the number of times the program is to be
+	// executed. The default value of 0 means one execution.
+	Repeat uint32
 }
 
-// RunTest tests the program, as specified by t.
-func (p *Prog) RunTest(t Test) error {
+// TestResults holds the results of a test run.
+type TestResults struct {
+	// ReturnValue is the return value of the eBPF program.
+	ReturnValue uint32
+
+	// Duration is the total execution time, in nanoseconds.
+	Duration uint32
+
+	// Output is the output slice. It aliases TestRun.Output, but its
+	// length is set to the length returned by the kernel.
+	Output []byte
+
+	// TestRun is the associated test run configuration.
+	TestRun TestRun
+}
+
+// DoTestRun executes a test run of the program.
+func (p *Prog) DoTestRun(tr TestRun) (*TestResults, error) {
 	if p.pfd == nil {
-		return errProgNotLoaded
+		return nil, errProgNotLoaded
 	}
-	return p.pfd.RunTest(t)
+	return p.pfd.DoTestRun(tr)
 }
 
 // Unload unloads the program from the kernel and releases the associated
@@ -286,24 +309,30 @@ func (pfd *progFD) DetachFromSocket(sockFD int) error {
 	return sysDetachFromSocket(sockFD, sysfd)
 }
 
-func (pfd *progFD) RunTest(t Test) error {
+func (pfd *progFD) DoTestRun(tr TestRun) (*TestResults, error) {
 	sysfd, err := pfd.fd.Incref()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer pfd.fd.Decref()
 
 	params := progTestRunParams{
 		ProgFD:      uint32(sysfd),
-		Retval:      t.Retval,
-		DataSizeIn:  uint32(len(t.Input)),
-		DataSizeOut: uint32(len(t.Output)),
-		DataIn:      bptr(t.Input),
-		DataOut:     bptr(t.Output),
-		Repeat:      t.Repeat,
-		Duration:    t.Duration,
+		DataSizeIn:  uint32(len(tr.Input)),
+		DataSizeOut: uint32(len(tr.Output)),
+		DataIn:      bptr(tr.Input),
+		DataOut:     bptr(tr.Output),
+		Repeat:      tr.Repeat,
 	}
-	return sysProgTestRun(&params)
+	if err := sysProgTestRun(&params); err != nil {
+		return nil, err
+	}
+	return &TestResults{
+		ReturnValue: params.Retval,
+		Duration:    params.Duration,
+		Output:      tr.Output[:params.DataSizeOut],
+		TestRun:     tr,
+	}, nil
 }
 
 func (pfd *progFD) Close() error {

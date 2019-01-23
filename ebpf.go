@@ -163,6 +163,15 @@ func IsTooBig(err error) bool {
 	return false
 }
 
+// IsPerm returns a boolean indicating whether err is known
+// to report a permissions error.
+func IsPerm(err error) bool {
+	if c, ok := err.(causer); ok {
+		return c.Cause() == unix.EPERM
+	}
+	return false
+}
+
 // System call hooks.
 
 // bpfFunc hooks the bpf(2) system call.
