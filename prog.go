@@ -19,7 +19,7 @@ import (
 	"os"
 	"unsafe"
 
-	"acln.ro/rc"
+	"acln.ro/rc/v2"
 
 	"golang.org/x/sys/unix"
 )
@@ -278,61 +278,55 @@ type progFD struct {
 }
 
 func (pfd *progFD) Init(cfg *progConfig) error {
-	fd, err := sysProgLoad(cfg)
+	rawfd, err := sysProgLoad(cfg)
 	if err != nil {
 		return err
 	}
-	if err := pfd.fd.Init(fd); err != nil {
+	if err := pfd.fd.Init(rawfd, closeFunc); err != nil {
 		return err
 	}
 	// TODO(acln): what do we do about the attach type?
 	return nil
 }
 
-func (pfd *progFD) AttachToSocket(sockFD int) error {
-	sysfd, err := pfd.fd.Incref()
-	if err != nil {
-		return err
-	}
-	defer pfd.fd.Decref()
-
-	return sysAttachToSocket(sockFD, sysfd)
+func (pfd *progFD) AttachToSocket(sockfd int) error {
+	return pfd.fd.Do(func(rawfd int) error {
+		return sysAttachToSocket(sockfd, rawfd)
+	})
 }
 
-func (pfd *progFD) DetachFromSocket(sockFD int) error {
-	sysfd, err := pfd.fd.Incref()
-	if err != nil {
-		return err
-	}
-	defer pfd.fd.Decref()
-
-	return sysDetachFromSocket(sockFD, sysfd)
+func (pfd *progFD) DetachFromSocket(sockfd int) error {
+	return pfd.fd.Do(func(rawfd int) error {
+		return sysDetachFromSocket(sockfd, rawfd)
+	})
 }
 
 func (pfd *progFD) DoTestRun(tr TestRun) (*TestResults, error) {
-	sysfd, err := pfd.fd.Incref()
+	var results *TestResults
+	err := pfd.fd.Do(func(rawfd int) error {
+		params := progTestRunParams{
+			ProgFD:      uint32(rawfd),
+			DataSizeIn:  uint32(len(tr.Input)),
+			DataSizeOut: uint32(len(tr.Output)),
+			DataIn:      bptr(tr.Input),
+			DataOut:     bptr(tr.Output),
+			Repeat:      tr.Repeat,
+		}
+		if err := sysProgTestRun(&params); err != nil {
+			return err
+		}
+		results = &TestResults{
+			ReturnValue: params.Retval,
+			Duration:    params.Duration,
+			Output:      tr.Output[:params.DataSizeOut],
+			TestRun:     tr,
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer pfd.fd.Decref()
-
-	params := progTestRunParams{
-		ProgFD:      uint32(sysfd),
-		DataSizeIn:  uint32(len(tr.Input)),
-		DataSizeOut: uint32(len(tr.Output)),
-		DataIn:      bptr(tr.Input),
-		DataOut:     bptr(tr.Output),
-		Repeat:      tr.Repeat,
-	}
-	if err := sysProgTestRun(&params); err != nil {
-		return nil, err
-	}
-	return &TestResults{
-		ReturnValue: params.Retval,
-		Duration:    params.Duration,
-		Output:      tr.Output[:params.DataSizeOut],
-		TestRun:     tr,
-	}, nil
+	return results, nil
 }
 
 func (pfd *progFD) Close() error {
@@ -359,9 +353,11 @@ func sysProgLoad(cfg *progConfig) (int, error) {
 	return fd, wrapSyscallError(cmdProgLoad, err)
 }
 
+// TODO(acln): document which of the following are input and output params
+
 type progTestRunParams struct {
 	ProgFD      uint32
-	Retval      uint32 // TODO(acln): what is this?
+	Retval      uint32
 	DataSizeIn  uint32
 	DataSizeOut uint32
 	DataIn      u64ptr

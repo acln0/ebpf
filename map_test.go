@@ -23,8 +23,6 @@ import (
 	"sync"
 	"testing"
 	"unsafe"
-
-	"acln.ro/rc"
 )
 
 func TestHashmap(t *testing.T) {
@@ -445,9 +443,9 @@ var hookmu sync.Mutex
 // hook hooks close(2) and bpf(2).
 func (t *mapFDTracker) hook() {
 	hookmu.Lock()
-	t.originalClose = rc.CloseFunc
+	t.originalClose = closeFunc
 	t.originalBPF = bpfFunc
-	rc.CloseFunc = t.close
+	closeFunc = t.close
 	bpfFunc = t.bpf
 	hookmu.Unlock()
 }
@@ -459,7 +457,7 @@ func (t *mapFDTracker) unhook() mapFDStats {
 	defer t.mu.Unlock()
 	defer hookmu.Unlock()
 
-	rc.CloseFunc = t.originalClose
+	closeFunc = t.originalClose
 	bpfFunc = t.originalBPF
 	var inFlight, unexpectedClose map[int]string
 	if t.inFlight != nil {

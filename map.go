@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"unsafe"
 
-	"acln.ro/rc"
+	"acln.ro/rc/v2"
 
 	"golang.org/x/sys/unix"
 )
@@ -216,12 +216,14 @@ type mapFD struct {
 	maxEntries uint32
 }
 
+var closeFunc = unix.Close // hook for tests
+
 func (m *mapFD) Init(cfg *mapConfig) error {
-	sysfd, err := sysCreateMap(cfg)
+	rawfd, err := sysCreateMap(cfg)
 	if err != nil {
 		return err
 	}
-	if err := m.fd.Init(sysfd); err != nil {
+	if err := m.fd.Init(rawfd, closeFunc); err != nil {
 		return err
 	}
 	m.keySize = int(cfg.KeySize)
@@ -231,16 +233,13 @@ func (m *mapFD) Init(cfg *mapConfig) error {
 }
 
 func (m *mapFD) Lookup(k, v []byte) error {
-	sysfd, err := m.fd.Incref()
-	if err != nil {
-		return err
-	}
-	defer m.fd.Decref()
-
 	if err := m.ensureCorrectKeyValueSize(k, v); err != nil {
 		return err
 	}
-	return sysLookup(sysfd, k, v)
+	return m.fd.Do(func(rawfd int) error {
+		return sysLookup(rawfd, k, v)
+	})
+
 }
 
 // Flags for map update operations.
@@ -251,71 +250,55 @@ const (
 )
 
 func (m *mapFD) Update(k, v []byte, flag uint64) error {
-	sysfd, err := m.fd.Incref()
-	if err != nil {
-		return err
-	}
-	defer m.fd.Decref()
-
 	if err := m.ensureCorrectKeyValueSize(k, v); err != nil {
 		return err
 	}
-	return sysUpdate(sysfd, k, v, flag)
+	return m.fd.Do(func(rawfd int) error {
+		return sysUpdate(rawfd, k, v, flag)
+	})
 }
 
 func (m *mapFD) Delete(k []byte) error {
-	sysfd, err := m.fd.Incref()
-	if err != nil {
-		return err
-	}
-	defer m.fd.Decref()
-
 	if err := m.ensureCorrectKeySize(k); err != nil {
 		return err
 	}
-	return sysDelete(sysfd, k)
+	return m.fd.Do(func(rawfd int) error {
+		return sysDelete(rawfd, k)
+	})
 }
 
 func (m *mapFD) Iterate(fn func(k, v []byte) bool, startHint []byte) error {
-	sysfd, err := m.fd.Incref()
-	if err != nil {
-		return err
-	}
-	defer m.fd.Decref()
-
-	key := make([]byte, m.keySize)
-	if err := sysFindFirstKey(sysfd, startHint, key); err != nil {
-		return err
-	}
-	nextKey := make([]byte, m.keySize)
-	value := make([]byte, m.valueSize)
-	for {
-		if err := sysLookup(sysfd, key, value); err != nil {
+	return m.fd.Do(func(rawfd int) error {
+		key := make([]byte, m.keySize)
+		if err := sysFindFirstKey(rawfd, startHint, key); err != nil {
 			return err
 		}
-		if stop := fn(key, value); stop {
-			return nil
-		}
-		if errno := sysNextKeyNowrap(sysfd, key, nextKey); errno != nil {
-			if errno == unix.ENOENT {
-				// No more entries. Clean end.
+		nextKey := make([]byte, m.keySize)
+		value := make([]byte, m.valueSize)
+		for {
+			if err := sysLookup(rawfd, key, value); err != nil {
+				return err
+			}
+			if stop := fn(key, value); stop {
 				return nil
 			}
-			return wrapSyscallError(cmdMapGetNextKey, errno)
+			if errno := sysNextKeyNowrap(rawfd, key, nextKey); errno != nil {
+				if errno == unix.ENOENT {
+					// No more entries. Clean end.
+					return nil
+				}
+				return wrapSyscallError(cmdMapGetNextKey, errno)
+			}
+			copy(key, nextKey)
 		}
-		copy(key, nextKey)
-	}
+	})
 }
 
 func (m *mapFD) ReadFD(fd *int) error {
-	sysfd, err := m.fd.Incref()
-	if err != nil {
-		return err
-	}
-	defer m.fd.Decref()
-
-	*fd = sysfd
-	return nil
+	return m.fd.Do(func(rawfd int) error {
+		*fd = rawfd
+		return nil
+	})
 }
 
 func (m *mapFD) Close() error {
@@ -393,10 +376,10 @@ type mapConfig struct {
 }
 
 // sysLookup wraps BPF_MAP_LOOKUP_ELEM.
-func sysLookup(sysfd int, k, v []byte) error {
+func sysLookup(rawfd int, k, v []byte) error {
 	const cmd = cmdMapLookup
 	p := mapLookupParams{
-		FD:    uint32(sysfd),
+		FD:    uint32(rawfd),
 		Key:   bptr(k),
 		Value: bptr(v),
 	}
@@ -413,10 +396,10 @@ type mapLookupParams struct {
 }
 
 // sysUpdate wraps BPF_MAP_UPDATE_ELEM.
-func sysUpdate(sysfd int, k, v []byte, flag uint64) error {
+func sysUpdate(rawfd int, k, v []byte, flag uint64) error {
 	const cmd = cmdMapUpdate
 	p := mapUpdateParams{
-		FD:    uint32(sysfd),
+		FD:    uint32(rawfd),
 		Key:   bptr(k),
 		Value: bptr(v),
 		Flag:  flag,
@@ -434,10 +417,10 @@ type mapUpdateParams struct {
 }
 
 // sysDelete wraps BPF_MAP_DELETE_ELEM.
-func sysDelete(sysfd int, k []byte) error {
+func sysDelete(rawfd int, k []byte) error {
 	const cmd = cmdMapDelete
 	p := mapDeleteParams{
-		FD:  uint32(sysfd),
+		FD:  uint32(rawfd),
 		Key: bptr(k),
 	}
 	_, err := bpfFunc(cmd, unsafe.Pointer(&p), unsafe.Sizeof(p))
@@ -453,8 +436,8 @@ type mapDeleteParams struct {
 }
 
 // sysNextKey wraps BPF_MAP_GET_NEXT_KEY.
-func sysNextKey(sysfd int, k, next []byte) error {
-	return wrapSyscallError(cmdMapGetNextKey, sysNextKeyNowrap(sysfd, k, next))
+func sysNextKey(rawfd int, k, next []byte) error {
+	return wrapSyscallError(cmdMapGetNextKey, sysNextKeyNowrap(rawfd, k, next))
 }
 
 // sysFindFirstKey finds the first key in a map, and stores it in key.
@@ -462,8 +445,8 @@ func sysNextKey(sysfd int, k, next []byte) error {
 // sysFindFirstKey only returns EFAULT in unexpected cases. If hint is nil
 // and BPF_MAP_GET_NEXT_KEY returns EFAULT, findFirstKey returns an error
 // describing that the key hint must be present.
-func sysFindFirstKey(sysfd int, hint, key []byte) error {
-	errno := sysNextKeyNowrap(sysfd, hint, key)
+func sysFindFirstKey(rawfd int, hint, key []byte) error {
+	errno := sysNextKeyNowrap(rawfd, hint, key)
 	if errno == unix.EFAULT && hint == nil {
 		return errors.New("missing first key hint")
 	}
@@ -472,9 +455,9 @@ func sysFindFirstKey(sysfd int, hint, key []byte) error {
 
 // sysNextKeyNowrap wraps BPF_MAP_GET_NEXT_KEY, but does not wrap the error in
 // a *SyscallError by default.
-func sysNextKeyNowrap(sysfd int, k, next []byte) error {
+func sysNextKeyNowrap(rawfd int, k, next []byte) error {
 	p := mapNextKeyParams{
-		FD:      uint32(sysfd),
+		FD:      uint32(rawfd),
 		Key:     bptr(k),
 		NextKey: bptr(next),
 	}
