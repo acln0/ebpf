@@ -182,11 +182,16 @@ func (raw RawSocketFD) Control(fn func(fd uintptr)) error {
 	return nil
 }
 
-// AttachSocket attaches the program to a socket.
-func (p *Prog) AttachSocket(sock Socket) error {
+// AttachToSocket attaches the program to a socket.
+//
+// It sets the SO_ATTACH_BPF option, at the SOL_SOCKET level.
+func (p *Prog) AttachToSocket(sock Socket) error {
+	if p.pfd == nil {
+		return errors.New("ebpf: program not loaded")
+	}
 	var err error
 	cerr := sock.Control(func(fd uintptr) {
-		err = p.pfd.Attach(int(fd))
+		err = p.pfd.AttachToSocket(int(fd))
 	})
 	if cerr != nil {
 		return cerr
@@ -194,18 +199,26 @@ func (p *Prog) AttachSocket(sock Socket) error {
 	return err
 }
 
-// AttachCGroup attaches the program to a control group.
+// AttachToCGroup attaches the program to a control group.
 //
 // TODO(acln): implement this
-func (p *Prog) AttachCGroup(fd int, typ AttachType, flag CGroupAttachFlag) error {
+func (p *Prog) AttachToCGroup(fd int, typ AttachType, flag CGroupAttachFlag) error {
 	return errNotImplemented
 }
 
-// Detach detaches the program from the associated file descriptor. Most
-// programs don't need to call Detach explicitly, since it is called by
-// Unload.
-func (p *Prog) Detach() error {
-	return p.pfd.Detach()
+// DetachFromSocket detaches the program from the specified socket.
+func (p *Prog) DetachFromSocket(sock Socket) error {
+	if p.pfd == nil {
+		return errors.New("ebpf: program not loaded")
+	}
+	var err error
+	cerr := sock.Control(func(fd uintptr) {
+		err = p.pfd.DetachFromSocket(int(fd))
+	})
+	if cerr != nil {
+		return cerr
+	}
+	return err
 }
 
 // Test specifies a test run for an eBPF program.
@@ -225,7 +238,6 @@ func (p *Prog) RunTest(t Test) error {
 // Unload unloads the program from the kernel and releases the associated
 // file descriptor.
 func (p *Prog) Unload() error {
-	p.Detach()
 	return p.pfd.Close()
 }
 
@@ -246,7 +258,7 @@ func (pfd *progFD) Init(cfg *progConfig) error {
 	return nil
 }
 
-func (pfd *progFD) Attach(sockFD int) error {
+func (pfd *progFD) AttachToSocket(sockFD int) error {
 	sysfd, err := pfd.fd.Incref()
 	if err != nil {
 		return err
@@ -256,9 +268,14 @@ func (pfd *progFD) Attach(sockFD int) error {
 	return sysAttachToSocket(sockFD, sysfd)
 }
 
-func (pfd *progFD) Detach() error {
-	// TODO(acln): implement this
-	return errNotImplemented
+func (pfd *progFD) DetachFromSocket(sockFD int) error {
+	sysfd, err := pfd.fd.Incref()
+	if err != nil {
+		return err
+	}
+	defer pfd.fd.Decref()
+
+	return sysDetachFromSocket(sockFD, sysfd)
 }
 
 func (pfd *progFD) RunTest(t Test) error {
@@ -333,16 +350,20 @@ func sysProgAttach(cfg *progAttachParams) error {
 	return wrapSyscallError(cmdProgAttach, err)
 }
 
-func sysAttachToSocket(sockFD int, progFD int) error {
+func sysAttachToSocket(targetFD int, progFD int) error {
 	const level = unix.SOL_SOCKET
 	const opt = unix.SO_ATTACH_BPF
-	err := unix.SetsockoptInt(sockFD, level, opt, progFD)
-	if err != nil {
-		// TODO(acln): find a better way than this
-		return &os.SyscallError{
-			Syscall: "setsockopt",
-			Err:     err,
-		}
+	if err := unix.SetsockoptInt(targetFD, level, opt, progFD); err != nil {
+		return &os.SyscallError{Syscall: "setsockopt", Err: err}
+	}
+	return nil
+}
+
+func sysDetachFromSocket(targetFD int, progFD int) error {
+	const level = unix.SOL_SOCKET
+	const opt = unix.SO_DETACH_BPF
+	if err := unix.SetsockoptInt(targetFD, level, opt, 0); err != nil {
+		return &os.SyscallError{Syscall: "setsockopt", Err: err}
 	}
 	return nil
 }
