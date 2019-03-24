@@ -349,98 +349,201 @@ type KernelFunc int32
 
 // Kernel functions.
 const (
-	KernelFunctionUnspec   KernelFunc = iota // bpf_unspec
-	MapLookupElem                            // bpf_map_lookup_elem
-	MapUpdateElem                            // bpf_map_update_elem
-	MapDeleteElem                            // bpf_map_delete_elem
-	ProbeRead                                // bpf_probe_read
-	KTimeGetNS                               // bpf_ktime_get_ns
-	TracePrintk                              // bpf_trace_printk
-	GetPrandomU32                            // bpf_get_prandom_u32
-	GetSMPProcessorID                        // bpf_get_smp_processor_id
-	SKBStoreBytes                            // bpf_skb_store_bytes
-	L3CSumReplace                            // bpf_l3_csum_replace
-	L4CSumReplace                            // bpf_l4_csum_replace
-	TailCall                                 // bpf_tail_call
-	CloneRedirect                            // bpf_clone_redirect
-	GetCurrentPIDTGID                        // bpf_get_current_pid_tgid
-	GetCurrentUIDGID                         // bpf_get_current_uid_gid
-	GetCurrentComm                           // bpf_get_current_comm
-	GetCGroupClassID                         // bpf_get_cgroup_classid
-	SKBVLanPush                              // bpf_skb_vlan_push
-	SKBVLanPop                               // bpf_skb_vlan_pop
-	SKBGetTunnelKey                          // bpf_skb_get_tunnel_key
-	SKBSetTunnelKey                          // bpf_skb_set_tunnel_key
-	PerfEventRead                            // bpf_perf_event_read
-	Redirect                                 // bpf_redirect
-	GetRouteRealm                            // bpf_get_route_realm
-	PerfEventOutput                          // bpf_perf_event_output
-	SKBLoadBytes                             // bpf_skb_load_bytes
-	GetStackID                               // bpf_get_stackid
-	CSumDiff                                 // bpf_csum_diff
-	SKBGetTunnelOpt                          // bpf_skb_get_tunnel_opt
-	SKBSetTunnelOpt                          // bpf_skb_set_tunnel_opt
-	SKBChangeProto                           // bpf_skb_change_proto
-	SKBChangeType                            // bpf_skb_change_type
-	SKBUnderCGroup                           // bpf_skb_under_cgroup
-	GetHashRecalc                            // bpf_get_hash_recalc
-	GetCurrentTask                           // bpf_get_current_task
-	ProbeWriteUser                           // bpf_probe_write_user
-	CurrentTaskUnderCGroup                   // bpf_current_task_under_cgroup
-	SKBChangeTail                            // bpf_skb_change_tail
-	SKBPullData                              // bpf_skb_pull_data
-	CSumUpdate                               // bpf_csum_update
-	SetHashInvalid                           // bpf_set_hash_invalid
-	GetNUMANodeID                            // bpf_get_numa_node_id
-	SKBChangeHEad                            // bpf_skb_change_head
-	XDPAdjustHead                            // bpf_xdp_adjust_head
-	ProbeReadStr                             // bpf_probe_read_str
-	GetSocketCookie                          // bpf_get_socket_cookie
-	GetSocketUID                             // bpf_get_socket_uid
-	SetHash                                  // bpf_set_hash
-	SetSockopt                               // bpf_setsockopt
-	SKBAdjustRoom                            // bpf_skb_adjust_room
-	RedirectMap                              // bpf_redirect_map
-	SKRedirectMap                            // bpf_sk_redirect_map
-	SockMapUpdate                            // bpf_sock_map_update
-	XDPAdjustMeta                            // bpf_xdp_adjust_meta
-	PerfEventReadValue                       // bpf_perf_event_read_value
-	PerfProgReadValue                        // bpf_perf_prog_read_value
-	GetSockopt                               // bpf_getsockopt
-	OverrideReturn                           // bpf_override_return
-	SockOpsCBFlagsSet                        // bpf_sock_ops_cb_flags_set
-	MsgRedirectMap                           // bpf_msg_redirect_map
-	MsgApplyBytes                            // bpf_msg_apply_bytes
-	MsgCorkBytes                             // bpf_msg_cork_bytes
-	MsgPullData                              // bpf_msg_pull_data
-	Bind                                     // bpf_bind
-	XDPAdjustTail                            // bpf_xdp_adjust_tail
-	SKBGetXFRMState                          // bpf_skb_get_xfrm_state
-	GetStack                                 // bpf_get_stack
-	SKBLoadBytesRelative                     // bpf_skb_load_bytes_relative
-	FibLookup                                // bpf_fib_lookup
-	SockHashUpdate                           // bpf_sock_hash_update
-	MsgRedirectHash                          // bpf_msg_redirect_hash
-	SKRedirectHash                           // bpf_sk_redirect_hash
-	LWTPushEncap                             // bpf_lwt_push_encap
-	LWTSeg6StoreBytes                        // bpf_lwt_seg6_store_bytes
-	LWTSeg6AdjustSRH                         // bpf_lwt_seg6_adjust_srh
-	LWTSeg6Action                            // bpf_lwt_seg6_action
-	RCRepeat                                 // bpf_rc_repeat
-	RCKeydown                                // bpf_rc_keydown
-	SKBCGroupID                              // bpf_skb_cgroup_id
-	GetCurrentCGroupID                       // bpf_get_current_cgroup_id
-	GetLocalStorage                          // bpf_get_local_storage
-	SKSelectReuseport                        // bpf_sk_select_reuseport
-	SKBAncestorCGroupID                      // bpf_skb_ancestor_cgroup_id
-	SKLookupTCP                              // bpf_sk_lookup_tcp
-	SKLookupUDP                              // bpf_sk_lookup_udp
-	SKRelease                                // bpf_sk_release
-	MapPushElem                              // bpf_map_push_elem
-	MapPopElem                               // bpf_map_pop_elem
-	MapPeekElem                              // bpf_map_peek_elem
-	MsgPushData                              // bpf_msg_push_data
+	KernelFunctionUnspec KernelFunc = iota // bpf_unspec
+
+	MapLookupElem          // bpf_map_lookup_elem
+	MapUpdateElem          // bpf_map_update_elem
+	MapDeleteElem          // bpf_map_delete_elem
+	ProbeRead              // bpf_probe_read
+	KTimeGetNS             // bpf_ktime_get_ns
+	TracePrintk            // bpf_trace_printk
+	GetPrandomU32          // bpf_get_prandom_u32
+	GetSMPProcessorID      // bpf_get_smp_processor_id
+	SKBStoreBytes          // bpf_skb_store_bytes
+	L3CSumReplace          // bpf_l3_csum_replace
+	L4CSumReplace          // bpf_l4_csum_replace
+	TailCall               // bpf_tail_call
+	CloneRedirect          // bpf_clone_redirect
+	GetCurrentPIDTGID      // bpf_get_current_pid_tgid
+	GetCurrentUIDGID       // bpf_get_current_uid_gid
+	GetCurrentComm         // bpf_get_current_comm
+	GetCGroupClassID       // bpf_get_cgroup_classid
+	SKBVLanPush            // bpf_skb_vlan_push
+	SKBVLanPop             // bpf_skb_vlan_pop
+	SKBGetTunnelKey        // bpf_skb_get_tunnel_key
+	SKBSetTunnelKey        // bpf_skb_set_tunnel_key
+	PerfEventRead          // bpf_perf_event_read
+	Redirect               // bpf_redirect
+	GetRouteRealm          // bpf_get_route_realm
+	PerfEventOutput        // bpf_perf_event_output
+	SKBLoadBytes           // bpf_skb_load_bytes
+	GetStackID             // bpf_get_stackid
+	CSumDiff               // bpf_csum_diff
+	SKBGetTunnelOpt        // bpf_skb_get_tunnel_opt
+	SKBSetTunnelOpt        // bpf_skb_set_tunnel_opt
+	SKBChangeProto         // bpf_skb_change_proto
+	SKBChangeType          // bpf_skb_change_type
+	SKBUnderCGroup         // bpf_skb_under_cgroup
+	GetHashRecalc          // bpf_get_hash_recalc
+	GetCurrentTask         // bpf_get_current_task
+	ProbeWriteUser         // bpf_probe_write_user
+	CurrentTaskUnderCGroup // bpf_current_task_under_cgroup
+	SKBChangeTail          // bpf_skb_change_tail
+	SKBPullData            // bpf_skb_pull_data
+	CSumUpdate             // bpf_csum_update
+	SetHashInvalid         // bpf_set_hash_invalid
+	GetNUMANodeID          // bpf_get_numa_node_id
+	SKBChangeHEad          // bpf_skb_change_head
+	XDPAdjustHead          // bpf_xdp_adjust_head
+	ProbeReadStr           // bpf_probe_read_str
+	GetSocketCookie        // bpf_get_socket_cookie
+	GetSocketUID           // bpf_get_socket_uid
+	SetHash                // bpf_set_hash
+	SetSockopt             // bpf_setsockopt
+	SKBAdjustRoom          // bpf_skb_adjust_room
+	RedirectMap            // bpf_redirect_map
+	SKRedirectMap          // bpf_sk_redirect_map
+	SockMapUpdate          // bpf_sock_map_update
+	XDPAdjustMeta          // bpf_xdp_adjust_meta
+	PerfEventReadValue     // bpf_perf_event_read_value
+	PerfProgReadValue      // bpf_perf_prog_read_value
+	GetSockopt             // bpf_getsockopt
+	OverrideReturn         // bpf_override_return
+	SockOpsCBFlagsSet      // bpf_sock_ops_cb_flags_set
+	MsgRedirectMap         // bpf_msg_redirect_map
+	MsgApplyBytes          // bpf_msg_apply_bytes
+	MsgCorkBytes           // bpf_msg_cork_bytes
+	MsgPullData            // bpf_msg_pull_data
+	Bind                   // bpf_bind
+	XDPAdjustTail          // bpf_xdp_adjust_tail
+	SKBGetXFRMState        // bpf_skb_get_xfrm_state
+	GetStack               // bpf_get_stack
+	SKBLoadBytesRelative   // bpf_skb_load_bytes_relative
+	FibLookup              // bpf_fib_lookup
+	SockHashUpdate         // bpf_sock_hash_update
+	MsgRedirectHash        // bpf_msg_redirect_hash
+	SKRedirectHash         // bpf_sk_redirect_hash
+	LWTPushEncap           // bpf_lwt_push_encap
+	LWTSeg6StoreBytes      // bpf_lwt_seg6_store_bytes
+	LWTSeg6AdjustSRH       // bpf_lwt_seg6_adjust_srh
+	LWTSeg6Action          // bpf_lwt_seg6_action
+	RCRepeat               // bpf_rc_repeat
+	RCKeydown              // bpf_rc_keydown
+	SKBCGroupID            // bpf_skb_cgroup_id
+	GetCurrentCGroupID     // bpf_get_current_cgroup_id
+	GetLocalStorage        // bpf_get_local_storage
+	SKSelectReuseport      // bpf_sk_select_reuseport
+	SKBAncestorCGroupID    // bpf_skb_ancestor_cgroup_id
+	SKLookupTCP            // bpf_sk_lookup_tcp
+	SKLookupUDP            // bpf_sk_lookup_udp
+	SKRelease              // bpf_sk_release
+	MapPushElem            // bpf_map_push_elem
+	MapPopElem             // bpf_map_pop_elem
+	MapPeekElem            // bpf_map_peek_elem
+	MsgPushData            // bpf_msg_push_data
 )
+
+// String returns the name of the kernel function represented by fn.
+func (fn KernelFunc) String() string {
+	s, ok := kernelFuncStrings[fn]
+	if !ok {
+		return "unknown kernel function"
+	}
+	return s
+}
+
+var kernelFuncStrings = map[KernelFunc]string{
+	MapLookupElem:          "bpf_map_lookup_elem",
+	MapUpdateElem:          "bpf_map_update_elem",
+	MapDeleteElem:          "bpf_map_delete_elem",
+	ProbeRead:              "bpf_probe_read",
+	KTimeGetNS:             "bpf_ktime_get_ns",
+	TracePrintk:            "bpf_trace_printk",
+	GetPrandomU32:          "bpf_get_prandom_u32",
+	GetSMPProcessorID:      "bpf_get_smp_processor_id",
+	SKBStoreBytes:          "bpf_skb_store_bytes",
+	L3CSumReplace:          "bpf_l3_csum_replace",
+	L4CSumReplace:          "bpf_l4_csum_replace",
+	TailCall:               "bpf_tail_call",
+	CloneRedirect:          "bpf_clone_redirect",
+	GetCurrentPIDTGID:      "bpf_get_current_pid_tgid",
+	GetCurrentUIDGID:       "bpf_get_current_uid_gid",
+	GetCurrentComm:         "bpf_get_current_comm",
+	GetCGroupClassID:       "bpf_get_cgroup_classid",
+	SKBVLanPush:            "bpf_skb_vlan_push",
+	SKBVLanPop:             "bpf_skb_vlan_pop",
+	SKBGetTunnelKey:        "bpf_skb_get_tunnel_key",
+	SKBSetTunnelKey:        "bpf_skb_set_tunnel_key",
+	PerfEventRead:          "bpf_perf_event_read",
+	Redirect:               "bpf_redirect",
+	GetRouteRealm:          "bpf_get_route_realm",
+	PerfEventOutput:        "bpf_perf_event_output",
+	SKBLoadBytes:           "bpf_skb_load_bytes",
+	GetStackID:             "bpf_get_stackid",
+	CSumDiff:               "bpf_csum_diff",
+	SKBGetTunnelOpt:        "bpf_skb_get_tunnel_opt",
+	SKBSetTunnelOpt:        "bpf_skb_set_tunnel_opt",
+	SKBChangeProto:         "bpf_skb_change_proto",
+	SKBChangeType:          "bpf_skb_change_type",
+	SKBUnderCGroup:         "bpf_skb_under_cgroup",
+	GetHashRecalc:          "bpf_get_hash_recalc",
+	GetCurrentTask:         "bpf_get_current_task",
+	ProbeWriteUser:         "bpf_probe_write_user",
+	CurrentTaskUnderCGroup: "bpf_current_task_under_cgroup",
+	SKBChangeTail:          "bpf_skb_change_tail",
+	SKBPullData:            "bpf_skb_pull_data",
+	CSumUpdate:             "bpf_csum_update",
+	SetHashInvalid:         "bpf_set_hash_invalid",
+	GetNUMANodeID:          "bpf_get_numa_node_id",
+	SKBChangeHEad:          "bpf_skb_change_head",
+	XDPAdjustHead:          "bpf_xdp_adjust_head",
+	ProbeReadStr:           "bpf_probe_read_str",
+	GetSocketCookie:        "bpf_get_socket_cookie",
+	GetSocketUID:           "bpf_get_socket_uid",
+	SetHash:                "bpf_set_hash",
+	SetSockopt:             "bpf_setsockopt",
+	SKBAdjustRoom:          "bpf_skb_adjust_room",
+	RedirectMap:            "bpf_redirect_map",
+	SKRedirectMap:          "bpf_sk_redirect_map",
+	SockMapUpdate:          "bpf_sock_map_update",
+	XDPAdjustMeta:          "bpf_xdp_adjust_meta",
+	PerfEventReadValue:     "bpf_perf_event_read_value",
+	PerfProgReadValue:      "bpf_perf_prog_read_value",
+	GetSockopt:             "bpf_getsockopt",
+	OverrideReturn:         "bpf_override_return",
+	SockOpsCBFlagsSet:      "bpf_sock_ops_cb_flags_set",
+	MsgRedirectMap:         "bpf_msg_redirect_map",
+	MsgApplyBytes:          "bpf_msg_apply_bytes",
+	MsgCorkBytes:           "bpf_msg_cork_bytes",
+	MsgPullData:            "bpf_msg_pull_data",
+	Bind:                   "bpf_bind",
+	XDPAdjustTail:          "bpf_xdp_adjust_tail",
+	SKBGetXFRMState:        "bpf_skb_get_xfrm_state",
+	GetStack:               "bpf_get_stack",
+	SKBLoadBytesRelative:   "bpf_skb_load_bytes_relative",
+	FibLookup:              "bpf_fib_lookup",
+	SockHashUpdate:         "bpf_sock_hash_update",
+	MsgRedirectHash:        "bpf_msg_redirect_hash",
+	SKRedirectHash:         "bpf_sk_redirect_hash",
+	LWTPushEncap:           "bpf_lwt_push_encap",
+	LWTSeg6StoreBytes:      "bpf_lwt_seg6_store_bytes",
+	LWTSeg6AdjustSRH:       "bpf_lwt_seg6_adjust_srh",
+	LWTSeg6Action:          "bpf_lwt_seg6_action",
+	RCRepeat:               "bpf_rc_repeat",
+	RCKeydown:              "bpf_rc_keydown",
+	SKBCGroupID:            "bpf_skb_cgroup_id",
+	GetCurrentCGroupID:     "bpf_get_current_cgroup_id",
+	GetLocalStorage:        "bpf_get_local_storage",
+	SKSelectReuseport:      "bpf_sk_select_reuseport",
+	SKBAncestorCGroupID:    "bpf_skb_ancestor_cgroup_id",
+	SKLookupTCP:            "bpf_sk_lookup_tcp",
+	SKLookupUDP:            "bpf_sk_lookup_udp",
+	SKRelease:              "bpf_sk_release",
+	MapPushElem:            "bpf_map_push_elem",
+	MapPopElem:             "bpf_map_pop_elem",
+	MapPeekElem:            "bpf_map_peek_elem",
+	MsgPushData:            "bpf_msg_push_data",
+}
 
 // MaxInstructions is the maximum number of instructions in a BPF or eBPF program.
 const MaxInstructions = 4096
