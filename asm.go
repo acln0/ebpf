@@ -1096,8 +1096,8 @@ func (s *InstructionStream) resolveMapSyms(maps map[string]*Map) error {
 				Index:  indices[0],
 			}
 		}
-		var fd int
-		if err := m.readFD(&fd); err != nil {
+		fd, err := m.readFD()
+		if err != nil {
 			// The map isn't valid. Nothing to do but bail out.
 			// TODO(acln): annotate this more?
 			return err

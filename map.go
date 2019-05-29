@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"unsafe"
 
-	"acln.ro/rc/v2"
-
 	"golang.org/x/sys/unix"
 )
 
@@ -108,7 +106,7 @@ func (m *Map) Init() error {
 	if m.MaxEntries == 0 {
 		return errors.New("ebpf: map MaxEntries not configured")
 	}
-	cfg := mapConfig{
+	cfg := mapAttr{
 		Type:           m.Type,
 		KeySize:        m.KeySize,
 		ValueSize:      m.ValueSize,
@@ -166,16 +164,19 @@ func (m *Map) Update(k, v []byte) error {
 	return wrapMapOpError("update", m.fd.Update(k, v, mapUpdateExist))
 }
 
-// Delete deletes the entry for k. If an entry for k does not exist in the
-// map, Delete returns an error such that IsNotExist(err) == true.
-func (m *Map) Delete(k []byte) error {
+// DeleteElem deletes the entry for k. If an entry for k does not exist in
+// the map, DeleteElem returns an error such that IsNotExist(err) == true.
+func (m *Map) DeleteElem(k []byte) error {
 	if m.fd == nil {
 		return errUninitializedMap
 	}
-	return wrapMapOpError("delete", m.fd.Delete(k))
+	return wrapMapOpError("delete", m.fd.DeleteElem(k))
 }
 
-// Iterate iterates over all keys in the map and calls fn for each key-value
+// MapIterFunc is a map iterator function.
+type MapIterFunc func(key, value []byte) (stop bool)
+
+// Iter iterates over all keys in the map and calls fn for each key-value
 // pair. If fn returns true or the final element of the map is reached,
 // iteration stops. fn must not retain the arguments it is called with.
 //
@@ -184,11 +185,11 @@ func (m *Map) Delete(k []byte) error {
 // nature of BPF map iterators, on Linux kernels older than 4.12, Iterate
 // requires a non-nil startHint. On Linux >= 4.12, startHint may be nil, but
 // it is recommended to pass a valid one nevertheless.
-func (m *Map) Iterate(fn func(k, v []byte) (stop bool), startHint []byte) error {
+func (m *Map) Iter(fn MapIterFunc, startHint []byte) error {
 	if m.fd == nil {
 		return errUninitializedMap
 	}
-	return wrapMapOpError("iterate", m.fd.Iterate(fn, startHint))
+	return wrapMapOpError("iter", m.fd.Iter(fn, startHint))
 }
 
 // Close destroys the map and releases the associated file descriptor. After a call
@@ -201,29 +202,27 @@ func (m *Map) Close() error {
 }
 
 // readFD stores the underlying file descriptor into fd.
-func (m *Map) readFD(fd *int) error {
+func (m *Map) readFD() (int, error) {
 	if m.fd == nil {
-		return errUninitializedMap
+		return -1, errUninitializedMap
 	}
-	return m.fd.ReadFD(fd)
+	return m.fd.RawFD()
 }
 
 // mapFD is a low level wrapper around a bpf map file descriptor.
 type mapFD struct {
-	fd         rc.FD
+	bfd        bpfFD
 	keySize    int
 	valueSize  int
 	maxEntries uint32
 }
 
-var closeFunc = unix.Close // hook for tests
-
-func (m *mapFD) Init(cfg *mapConfig) error {
-	rawfd, err := sysCreateMap(cfg)
+func (m *mapFD) Init(cfg *mapAttr) error {
+	rawfd, err := createMap(cfg)
 	if err != nil {
-		return err
+		return wrapCmdError(cmdMapCreate, err)
 	}
-	if err := m.fd.Init(rawfd, closeFunc); err != nil {
+	if err := m.bfd.Init(rawfd, unix.Close); err != nil {
 		return err
 	}
 	m.keySize = int(cfg.KeySize)
@@ -236,9 +235,7 @@ func (m *mapFD) Lookup(k, v []byte) error {
 	if err := m.ensureCorrectKeyValueSize(k, v); err != nil {
 		return err
 	}
-	return m.fd.Do(func(rawfd int) error {
-		return sysLookup(rawfd, k, v)
-	})
+	return m.bfd.MapLookup(k, v)
 
 }
 
@@ -253,56 +250,47 @@ func (m *mapFD) Update(k, v []byte, flag uint64) error {
 	if err := m.ensureCorrectKeyValueSize(k, v); err != nil {
 		return err
 	}
-	return m.fd.Do(func(rawfd int) error {
-		return sysUpdate(rawfd, k, v, flag)
-	})
+	return m.bfd.MapUpdate(k, v, flag)
 }
 
-func (m *mapFD) Delete(k []byte) error {
+func (m *mapFD) DeleteElem(k []byte) error {
 	if err := m.ensureCorrectKeySize(k); err != nil {
 		return err
 	}
-	return m.fd.Do(func(rawfd int) error {
-		return sysDelete(rawfd, k)
-	})
+	return m.bfd.MapDeleteElem(k)
 }
 
-func (m *mapFD) Iterate(fn func(k, v []byte) bool, startHint []byte) error {
-	return m.fd.Do(func(rawfd int) error {
-		key := make([]byte, m.keySize)
-		if err := sysFindFirstKey(rawfd, startHint, key); err != nil {
+func (m *mapFD) Iter(fn MapIterFunc, startHint []byte) error {
+	key := make([]byte, m.keySize)
+	if err := m.bfd.FindFirstMapKey(startHint, key); err != nil {
+		return err
+	}
+	nextKey := make([]byte, m.keySize)
+	value := make([]byte, m.valueSize)
+	for {
+		if err := m.bfd.MapLookup(key, value); err != nil {
 			return err
 		}
-		nextKey := make([]byte, m.keySize)
-		value := make([]byte, m.valueSize)
-		for {
-			if err := sysLookup(rawfd, key, value); err != nil {
-				return err
-			}
-			if stop := fn(key, value); stop {
+		if stop := fn(key, value); stop {
+			return nil
+		}
+		if err := m.bfd.MapGetNextKeyNoWrap(key, nextKey); err != nil {
+			if err == unix.ENOENT {
+				// No more entries. Clean end.
 				return nil
 			}
-			if errno := sysNextKeyNowrap(rawfd, key, nextKey); errno != nil {
-				if errno == unix.ENOENT {
-					// No more entries. Clean end.
-					return nil
-				}
-				return wrapSyscallError(cmdMapGetNextKey, errno)
-			}
-			copy(key, nextKey)
+			return wrapCmdError(cmdMapGetNextKey, err)
 		}
-	})
+		copy(key, nextKey)
+	}
 }
 
-func (m *mapFD) ReadFD(fd *int) error {
-	return m.fd.Do(func(rawfd int) error {
-		*fd = rawfd
-		return nil
-	})
+func (m *mapFD) RawFD() (int, error) {
+	return m.bfd.RawFD()
 }
 
 func (m *mapFD) Close() error {
-	return m.fd.Close()
+	return m.bfd.Close()
 }
 
 // argumentSizeError records an error a mismatch between the size of a key
@@ -348,19 +336,14 @@ func (m *mapFD) ensureCorrectKeySize(k []byte) error {
 	return nil
 }
 
-// Low level attribute structures and system call wrappers.
-// See union bpf_attr in bpf.h.
-
-// sysCreateMap wraps BPF_MAP_CREATE.
-func sysCreateMap(cfg *mapConfig) (int, error) {
-	const cmd = cmdMapCreate
-	fd, err := bpfFunc(cmd, unsafe.Pointer(cfg), unsafe.Sizeof(*cfg))
-	return fd, wrapSyscallError(cmd, err)
+// createMap creates a new BPF map.
+func createMap(attr *mapAttr) (rawfd int, err error) {
+	return bpf(cmdMapCreate, unsafe.Pointer(attr), unsafe.Sizeof(*attr))
 }
 
-// mapConfig configures a BPF map. It specifies the parameters for a
-// BPF_MAP_CREATE operation.
-type mapConfig struct {
+// mapAttr holds attributes which configure a map, for a BPF_MAP_CREATE
+// operation.
+type mapAttr struct {
 	Type           MapType
 	KeySize        uint32
 	ValueSize      uint32
@@ -373,104 +356,6 @@ type mapConfig struct {
 	BTFFD          uint32
 	BTFKeyTypeID   uint32
 	BTFValueTypeID uint32
-}
-
-// sysLookup wraps BPF_MAP_LOOKUP_ELEM.
-func sysLookup(rawfd int, k, v []byte) error {
-	const cmd = cmdMapLookup
-	p := mapLookupParams{
-		FD:    uint32(rawfd),
-		Key:   bptr(k),
-		Value: bptr(v),
-	}
-	_, err := bpfFunc(cmd, unsafe.Pointer(&p), unsafe.Sizeof(p))
-	return wrapSyscallError(cmd, err)
-}
-
-// mapLookupParams specifies parameters for a BPF_MAP_LOOKUP_ELEM operation.
-type mapLookupParams struct {
-	FD    uint32
-	Key   u64ptr
-	Value u64ptr
-	_     uint64
-}
-
-// sysUpdate wraps BPF_MAP_UPDATE_ELEM.
-func sysUpdate(rawfd int, k, v []byte, flag uint64) error {
-	const cmd = cmdMapUpdate
-	p := mapUpdateParams{
-		FD:    uint32(rawfd),
-		Key:   bptr(k),
-		Value: bptr(v),
-		Flag:  flag,
-	}
-	_, err := bpfFunc(cmd, unsafe.Pointer(&p), unsafe.Sizeof(p))
-	return wrapSyscallError(cmd, err)
-}
-
-// mapUpdateParams specifies parameters for a BPF_MAP_UPDATE_ELEM operation.
-type mapUpdateParams struct {
-	FD    uint32
-	Key   u64ptr
-	Value u64ptr
-	Flag  uint64
-}
-
-// sysDelete wraps BPF_MAP_DELETE_ELEM.
-func sysDelete(rawfd int, k []byte) error {
-	const cmd = cmdMapDelete
-	p := mapDeleteParams{
-		FD:  uint32(rawfd),
-		Key: bptr(k),
-	}
-	_, err := bpfFunc(cmd, unsafe.Pointer(&p), unsafe.Sizeof(p))
-	return wrapSyscallError(cmd, err)
-}
-
-// mapDeleteParams specifies parameters for a BPF_MAP_DELETE_ELEM operation.
-type mapDeleteParams struct {
-	FD  uint32
-	Key u64ptr
-	_   uint64
-	_   uint64
-}
-
-// sysNextKey wraps BPF_MAP_GET_NEXT_KEY.
-func sysNextKey(rawfd int, k, next []byte) error {
-	return wrapSyscallError(cmdMapGetNextKey, sysNextKeyNowrap(rawfd, k, next))
-}
-
-// sysFindFirstKey finds the first key in a map, and stores it in key.
-//
-// sysFindFirstKey only returns EFAULT in unexpected cases. If hint is nil
-// and BPF_MAP_GET_NEXT_KEY returns EFAULT, findFirstKey returns an error
-// describing that the key hint must be present.
-func sysFindFirstKey(rawfd int, hint, key []byte) error {
-	errno := sysNextKeyNowrap(rawfd, hint, key)
-	if errno == unix.EFAULT && hint == nil {
-		return errors.New("missing first key hint")
-	}
-	return wrapSyscallError(cmdMapGetNextKey, errno)
-}
-
-// sysNextKeyNowrap wraps BPF_MAP_GET_NEXT_KEY, but does not wrap the error in
-// a *SyscallError by default.
-func sysNextKeyNowrap(rawfd int, k, next []byte) error {
-	p := mapNextKeyParams{
-		FD:      uint32(rawfd),
-		Key:     bptr(k),
-		NextKey: bptr(next),
-	}
-	_, err := bpfFunc(cmdMapGetNextKey, unsafe.Pointer(&p), unsafe.Sizeof(p))
-	return err
-}
-
-// mapNextKeyParams specifies parameters for a BPF_MAP_GET_NEXT_KEY operation.
-type mapNextKeyParams struct {
-	FD      uint32
-	Key     u64ptr
-	NextKey u64ptr
-	_       uint64
 }
 
 // MapOpError records an error caused by a map operation.
@@ -487,11 +372,8 @@ func (e *MapOpError) Error() string {
 	return fmt.Sprintf("ebpf: map %s: %v", e.Op, e.Err)
 }
 
-// Cause returns e.Err's cause, if any, or e.Err itself otherwise.
-func (e *MapOpError) Cause() error {
-	if c, ok := e.Err.(causer); ok {
-		return c.Cause()
-	}
+// Unwrap returns e.Err.
+func (e *MapOpError) Unwrap() error {
 	return e.Err
 }
 

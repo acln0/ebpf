@@ -16,10 +16,7 @@ package ebpf
 
 import (
 	"errors"
-	"os"
 	"unsafe"
-
-	"acln.ro/rc/v2"
 
 	"golang.org/x/sys/unix"
 )
@@ -135,7 +132,7 @@ func (p *Prog) Load(s *InstructionStream) (log string, err error) {
 	}
 	insns := s.instructions()
 	logbuf := make([]byte, defaultLogBufSize)
-	cfg := progConfig{
+	attr := progLoadAttr{
 		Type:               p.Type,
 		InstructionCount:   uint32(len(insns)),
 		Instructions:       iptr(insns),
@@ -149,10 +146,10 @@ func (p *Prog) Load(s *InstructionStream) (log string, err error) {
 		ExpectedAttachType: p.ExpectedAttachType,
 	}
 	if p.StrictAlignment {
-		cfg.Flags = loadStrictAlignment
+		attr.Flags = loadStrictAlignment
 	}
 	pfd := new(progFD)
-	err = pfd.Init(&cfg)
+	err = pfd.Init(&attr)
 	for i := 0; i < len(logbuf); i++ {
 		if logbuf[i] == 0 {
 			log = string(logbuf[:i])
@@ -274,15 +271,15 @@ func (p *Prog) Unload() error {
 
 // progFD is a low level wrapper around a bpf program file descriptor.
 type progFD struct {
-	fd rc.FD
+	bfd bpfFD
 }
 
-func (pfd *progFD) Init(cfg *progConfig) error {
-	rawfd, err := sysProgLoad(cfg)
+func (pfd *progFD) Init(attr *progLoadAttr) error {
+	rawfd, err := loadProg(attr)
 	if err != nil {
-		return err
+		return wrapCmdError(cmdProgLoad, err)
 	}
-	if err := pfd.fd.Init(rawfd, closeFunc); err != nil {
+	if err := pfd.bfd.Init(rawfd, unix.Close); err != nil {
 		return err
 	}
 	// TODO(acln): what do we do about the attach type?
@@ -290,50 +287,22 @@ func (pfd *progFD) Init(cfg *progConfig) error {
 }
 
 func (pfd *progFD) AttachToSocket(sockfd int) error {
-	return pfd.fd.Do(func(rawfd int) error {
-		return sysAttachToSocket(sockfd, rawfd)
-	})
+	return pfd.bfd.ProgAttach(sockfd, unix.SOL_SOCKET)
 }
 
 func (pfd *progFD) DetachFromSocket(sockfd int) error {
-	return pfd.fd.Do(func(rawfd int) error {
-		return sysDetachFromSocket(sockfd, rawfd)
-	})
+	return pfd.bfd.ProgDetach(sockfd, unix.SOL_SOCKET)
 }
 
 func (pfd *progFD) DoTestRun(tr TestRun) (*TestResults, error) {
-	var results *TestResults
-	err := pfd.fd.Do(func(rawfd int) error {
-		params := progTestRunParams{
-			ProgFD:      uint32(rawfd),
-			DataSizeIn:  uint32(len(tr.Input)),
-			DataSizeOut: uint32(len(tr.Output)),
-			DataIn:      bptr(tr.Input),
-			DataOut:     bptr(tr.Output),
-			Repeat:      tr.Repeat,
-		}
-		if err := sysProgTestRun(&params); err != nil {
-			return err
-		}
-		results = &TestResults{
-			ReturnValue: params.Retval,
-			Duration:    params.Duration,
-			Output:      tr.Output[:params.DataSizeOut],
-			TestRun:     tr,
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return results, nil
+	return pfd.bfd.ProgTestRun(tr)
 }
 
 func (pfd *progFD) Close() error {
-	return pfd.fd.Close()
+	return pfd.bfd.Close()
 }
 
-type progConfig struct {
+type progLoadAttr struct {
 	Type               ProgType
 	InstructionCount   uint32
 	Instructions       u64ptr
@@ -348,65 +317,6 @@ type progConfig struct {
 	ExpectedAttachType AttachType
 }
 
-func sysProgLoad(cfg *progConfig) (int, error) {
-	fd, err := bpfFunc(cmdProgLoad, unsafe.Pointer(cfg), unsafe.Sizeof(*cfg))
-	return fd, wrapSyscallError(cmdProgLoad, err)
-}
-
-// TODO(acln): document which of the following are input and output params
-
-type progTestRunParams struct {
-	ProgFD      uint32
-	Retval      uint32
-	DataSizeIn  uint32
-	DataSizeOut uint32
-	DataIn      u64ptr
-	DataOut     u64ptr
-	Repeat      uint32
-	Duration    uint32
-}
-
-func sysProgTestRun(cfg *progTestRunParams) error {
-	_, err := bpfFunc(cmdProgTestRun, unsafe.Pointer(cfg), unsafe.Sizeof(*cfg))
-	return wrapSyscallError(cmdProgTestRun, err)
-}
-
-type progAttachParams struct {
-	TargetFD uint32
-	ProgFD   uint32
-	Type     AttachType
-	Flags    CGroupAttachFlag
-}
-
-func sysProgAttach(cfg *progAttachParams) error {
-	_, err := bpfFunc(cmdProgAttach, unsafe.Pointer(cfg), unsafe.Sizeof(*cfg))
-	return wrapSyscallError(cmdProgAttach, err)
-}
-
-func sysAttachToSocket(targetFD int, progFD int) error {
-	const level = unix.SOL_SOCKET
-	const opt = unix.SO_ATTACH_BPF
-	if err := unix.SetsockoptInt(targetFD, level, opt, progFD); err != nil {
-		return &os.SyscallError{Syscall: "setsockopt", Err: err}
-	}
-	return nil
-}
-
-func sysDetachFromSocket(targetFD int, progFD int) error {
-	const level = unix.SOL_SOCKET
-	const opt = unix.SO_DETACH_BPF
-	if err := unix.SetsockoptInt(targetFD, level, opt, 0); err != nil {
-		return &os.SyscallError{Syscall: "setsockopt", Err: err}
-	}
-	return nil
-}
-
-func nullTerminatedString(s string) []byte {
-	b := make([]byte, len(s)+1)
-	copy(b, s)
-	return b
-}
-
-func iptr(insns []instruction) u64ptr {
-	return u64ptr{p: unsafe.Pointer(&insns[0])}
+func loadProg(attr *progLoadAttr) (int, error) {
+	return bpf(cmdProgLoad, unsafe.Pointer(attr), unsafe.Sizeof(*attr))
 }

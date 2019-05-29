@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	offsetofIPHeader   = 23        // offsetof(struct iphdr, protocol)
+	offsetofIPHeader   = 23        // ETH_HLEN + offsetof(struct iphdr, protocol)
 	offsetofLinkLayer  = -0x200000 // SKF_LL_OFF
 	l4offsetofIPHeader = offsetofLinkLayer + offsetofIPHeader
 )

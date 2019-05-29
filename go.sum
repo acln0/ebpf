@@ -1,4 +1,4 @@
-acln.ro/rc/v2 v2.0.0 h1:Hm/UFE3s1wkGrf5Io8tabqYCotzN/LQF2E0VkPYgfC8=
-acln.ro/rc/v2 v2.0.0/go.mod h1:ho9YXCXjt51m71PI8DNdEnupSko0YcgzFo7LvPjoy2w=
+acln.ro/rc/v2 v2.2.0 h1:5+XoJ4mQOufXeSC1/bkmc44vXf56gff/MTBfyeVrFes=
+acln.ro/rc/v2 v2.2.0/go.mod h1:tkQuGOU6VkJy3Tx23hcERiXDvnr8OMuZxX8HgclXD/k=
 golang.org/x/sys v0.0.0-20181128092732-4ed8d59d0b35 h1:YAFjXN64LMvktoUZH9zgY4lGc/msGN7HQfoSuKCgaDU=
 golang.org/x/sys v0.0.0-20181128092732-4ed8d59d0b35/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=

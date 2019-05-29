@@ -16,17 +16,60 @@ package ebpf
 
 import (
 	"errors"
+	"os"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
 
+// Error checking routines.
+//
+// TODO(acln): remove when 1.13 is out
+
+type unwrapper interface {
+	Unwrap() error
+}
+
+func unwrap(err error) error {
+	for {
+		werr, ok := err.(unwrapper)
+		if !ok {
+			break
+		}
+		err = werr.Unwrap()
+	}
+	return err
+}
+
+func IsNotExist(err error) bool {
+	return os.IsNotExist(unwrap(err))
+}
+
+func IsExist(err error) bool {
+	return os.IsExist(unwrap(err))
+}
+
+func IsTooBig(err error) bool {
+	err = unwrap(err)
+	if se, ok := err.(*os.SyscallError); ok {
+		err = se.Err
+	}
+	return err == unix.E2BIG
+}
+
+func IsPerm(err error) bool {
+	return os.IsPermission(unwrap(err))
+}
+
+// command is a bpf(2) command.
+type command int
+
 // bpf(2) commands.
 const (
-	cmdMapCreate = iota
+	cmdMapCreate command = iota
 	cmdMapLookup
 	cmdMapUpdate
-	cmdMapDelete
+	cmdMapDeleteElem
 	cmdMapGetNextKey
 	cmdProgLoad
 	cmdObjPin
@@ -46,68 +89,39 @@ const (
 	cmdTaskFDQuery
 )
 
-func validCommand(cmd int) bool {
+func (cmd command) valid() bool {
 	return cmd >= cmdMapCreate && cmd <= cmdTaskFDQuery
 }
 
 var commandNames = [...]string{
-	cmdMapCreate:         "BPF_MAP_CREATE",
-	cmdMapLookup:         "BPF_MAP_LOOKUP_ELEM",
-	cmdMapUpdate:         "BPF_MAP_UPDATE_ELEM",
-	cmdMapDelete:         "BPF_MAP_DELETE_ELEM",
-	cmdMapGetNextKey:     "BPF_MAP_GET_NEXT_KEY",
-	cmdProgLoad:          "BPF_PROG_LOAD",
-	cmdObjPin:            "BPF_OBJ_PIN",
-	cmdObjGet:            "BPF_OBJ_GET",
-	cmdProgAttach:        "BPF_PROG_ATTACH",
-	cmdProgDetach:        "BPF_PROG_DETACH",
-	cmdProgTestRun:       "BPF_PROG_TEST_RUN",
-	cmdProgGetNextID:     "BPF_PROG_GET_NEXT_ID",
-	cmdMapGetNextID:      "BPF_MAP_GET_NEXT_ID",
-	cmdProgGetFDByID:     "BPF_PROG_GET_FD_BY_ID",
-	cmdMapGetFDByID:      "BPF_MAP_GET_FD_BY_ID",
-	cmdObjGetInfoByFD:    "BPF_OBJ_GET_INFO_BY_FD",
-	cmdProgQuery:         "BPF_PROG_QUERY",
-	cmdRawTracepointOpen: "BPF_RAW_TRACEPOINT_OPEN",
-	cmdBTFLoad:           "BPF_BTF_LOAD",
-	cmdBTFGetFDByID:      "BPF_BTF_GET_FD_BY_ID",
-	cmdTaskFDQuery:       "BPF_TASK_FD_QUERY",
+	cmdMapCreate:         "bpf_map_create",
+	cmdMapLookup:         "bpf_map_lookup_elem",
+	cmdMapUpdate:         "bpf_map_update_elem",
+	cmdMapDeleteElem:     "bpf_map_delete_elem",
+	cmdMapGetNextKey:     "bpf_map_get_next_key",
+	cmdProgLoad:          "bpf_prog_load",
+	cmdObjPin:            "bpf_obj_pin",
+	cmdObjGet:            "bpf_obj_get",
+	cmdProgAttach:        "bpf_prog_attach",
+	cmdProgDetach:        "bpf_prog_detach",
+	cmdProgTestRun:       "bpf_prog_test_run",
+	cmdProgGetNextID:     "bpf_prog_get_next_id",
+	cmdMapGetNextID:      "bpf_map_get_next_id",
+	cmdProgGetFDByID:     "bpf_prog_get_fd_by_id",
+	cmdMapGetFDByID:      "bpf_map_get_fd_by_id",
+	cmdObjGetInfoByFD:    "bpf_obj_get_info_by_fd",
+	cmdProgQuery:         "bpf_prog_query",
+	cmdRawTracepointOpen: "bpf_raw_tracepoint_open",
+	cmdBTFLoad:           "bpf_btf_load",
+	cmdBTFGetFDByID:      "bpf_btf_get_fd_by_id",
+	cmdTaskFDQuery:       "bpf_task_fd_query",
 }
 
-func commandString(cmd int) string {
-	if !validCommand(cmd) {
-		return "UNKNOWN"
+func (cmd command) String() string {
+	if !cmd.valid() {
+		return "bpf_unknown"
 	}
 	return commandNames[cmd]
-}
-
-// SyscallError records an error from a bpf(2) system call.
-//
-// Cmd is a string describing the bpf command executed, e.g.
-// "BPF_CREATE_MAP".
-//
-// Err is the underlying error, of type syscall.Errno.
-type SyscallError struct {
-	Cmd string
-	Err error
-}
-
-func (e *SyscallError) Error() string {
-	return e.Cmd + ": " + e.Err.Error()
-}
-
-// Cause returns the cause of the error: e.Err.
-func (e *SyscallError) Cause() error {
-	return e.Err
-}
-
-// wrapSyscallError wraps err in a *SyscallError. For convenience, if err
-// is nil, wrapSyscallError returns nil.
-func wrapSyscallError(cmd int, err error) error {
-	if err == nil {
-		return nil
-	}
-	return &SyscallError{Cmd: commandString(cmd), Err: err}
 }
 
 // errNotImplemented signals that a feature is not implemented.
@@ -130,65 +144,7 @@ func newObjectName(s string) objectName {
 	return name
 }
 
-type causer interface {
-	Cause() error
-}
-
-// Error introspection routines.
-
-// IsExist returns a boolean indicating whether err reports that
-// an object (e.g. an entry in a map) already exists.
-func IsExist(err error) bool {
-	if c, ok := err.(causer); ok {
-		return c.Cause() == unix.EEXIST
-	}
-	return false
-}
-
-// IsNotExist returns a boolean indicating whether err is reports
-// that an object (e.g. an entry in a map) does not exist.
-func IsNotExist(err error) bool {
-	if c, ok := err.(causer); ok {
-		return c.Cause() == unix.ENOENT
-	}
-	return false
-}
-
-// IsTooBig returns a boolean indicating whether err is known
-// to report that a map has reached its size limit.
-func IsTooBig(err error) bool {
-	if c, ok := err.(causer); ok {
-		return c.Cause() == unix.E2BIG
-	}
-	return false
-}
-
-// IsPerm returns a boolean indicating whether err is known
-// to report a permissions error.
-func IsPerm(err error) bool {
-	if c, ok := err.(causer); ok {
-		return c.Cause() == unix.EPERM
-	}
-	return false
-}
-
-// System call hooks.
-
-// bpfFunc hooks the bpf(2) system call.
-var bpfFunc = sysBPF
-
-// sysBPF calls bpf(2) with the specified arguments. It executes the command
-// cmd with attributes attr. size must be unsafe.Sizeof the object attr is
-// pointing to.
-func sysBPF(cmd uintptr, attr unsafe.Pointer, size uintptr) (int, error) {
-	r, _, e := unix.Syscall(unix.SYS_BPF, cmd, uintptr(attr), size)
-	if e != 0 {
-		return int(r), e
-	}
-	return int(r), nil
-}
-
-// Low level pointer-wrangling routines.
+// Low level data transformation routines.
 
 // uint32Bytes creates a []byte b such that &b[0] is i.
 func uint32Bytes(i *uint32) []byte {
@@ -202,4 +158,16 @@ func bptr(b []byte) u64ptr {
 		return u64ptr{p: unsafe.Pointer(nil)}
 	}
 	return u64ptr{p: unsafe.Pointer(&b[0])}
+}
+
+// iptr creates a u64ptr which carries &insns[0].
+func iptr(insns []instruction) u64ptr {
+	return u64ptr{p: unsafe.Pointer(&insns[0])}
+}
+
+// nullTerminatedString creates a null terminated string from s.
+func nullTerminatedString(s string) []byte {
+	b := make([]byte, len(s)+1)
+	copy(b, s)
+	return b
 }
