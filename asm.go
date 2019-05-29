@@ -17,6 +17,8 @@ package ebpf
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
+	"strconv"
 	"unsafe"
 )
 
@@ -64,6 +66,12 @@ func (o Opcode) ALUOp() ALUOp {
 // if o.Class() is JMP.
 func (o Opcode) JumpCond() JumpCond {
 	return JumpCond(o & jumpCondMask)
+}
+
+// SourceOperand returns the source operand associated with o, applicable
+// if o.Class() is ALU or ALU64.
+func (o Opcode) SourceOperand() SourceOperand {
+	return SourceOperand(o & sourceOperandMask)
 }
 
 func (o Opcode) String() string {
@@ -287,6 +295,8 @@ func (op SourceOperand) String() string {
 	}
 	return s
 }
+
+const sourceOperandMask = 0x08
 
 // Register is an eBPF register.
 type Register uint8
@@ -578,11 +588,6 @@ func (ins Instruction) pack(bo binary.ByteOrder) instruction {
 	return i
 }
 
-func (ins Instruction) String() string {
-	// TODO(acln): consult the clang and Linux kernel tools, then implement this in a compatible format
-	return errNotImplemented.Error()
-}
-
 // instruction is an assembled eBPF instruction, suitable for passing
 // into the Linux kernel.
 type instruction struct {
@@ -665,6 +670,141 @@ func (s *InstructionStream) byteOrder() binary.ByteOrder {
 		return s.ByteOrder
 	}
 	return hostByteOrder
+}
+
+// PrintTo prints the instruction stream in textual form to w.
+func (s *InstructionStream) PrintTo(w io.Writer) error {
+	sew := &stickyErrorWriter{w: w}
+	for index, ins := range s.insns {
+		s.printInstruction(sew, index, ins)
+		if index < len(s.insns)-1 {
+			io.WriteString(sew, "\n")
+		}
+	}
+	return sew.err
+}
+
+func (s *InstructionStream) printInstruction(w io.Writer, index int, rawins instruction) {
+	var bo binary.ByteOrder
+	if s.ByteOrder == nil {
+		bo = hostByteOrder
+	}
+
+	ins := rawins.unpack(bo)
+
+	switch class := ins.Opcode.Class(); class {
+	case ALU, ALU64:
+		opstr := ins.Opcode.ALUOp().String() // "add"
+
+		if class == ALU64 {
+			opstr += "64" // "add64"
+		} else {
+			opstr += "32" // "add32"
+		}
+
+		opstr += "\t" + ins.Dst.String() + ", " // "add64 r1, "
+
+		if ins.Opcode.SourceOperand() == X {
+			opstr += ins.Src.String() // "add64 r1, r3"
+		} else {
+			// Symbolic or direct immediate. Find out which.
+			if sym := s.symbol(index); sym == "" {
+				opstr += "#" + strconv.Itoa(int(ins.Imm)) // "add64 r1, #128"
+			} else {
+				opstr += "$" + sym // "add64 r1, $offset"
+			}
+		}
+
+		io.WriteString(w, opstr)
+
+	case JMP:
+		cond := ins.Opcode.JumpCond()
+
+		switch cond {
+		case CALL:
+			// "call bpf_probe_read"
+			fmt.Fprintf(w, "call\t%s", KernelFunc(ins.Imm).String())
+			return
+		case EXIT:
+			// "exit"
+			io.WriteString(w, cond.String())
+			return
+		}
+
+		opstr := cond.String() + "\t"    // "jeq "
+		opstr += ins.Dst.String() + ", " // "jeq r1, "
+
+		if ins.Opcode.SourceOperand() == X {
+			opstr += ins.Src.String() + ", " // "jeq r1, r2, "
+		} else {
+			if sym := s.symbol(index); sym == "" {
+				opstr += "#" + strconv.Itoa(int(ins.Imm)) // jeq r1, #128"
+			} else {
+				opstr += "$" + sym // "jeq r1, $proto"
+			}
+			opstr += ", " // "jeq r1, $proto, "
+		}
+
+		if ins.Off >= 0 {
+			opstr += "+" // "jeq r1, #128, +"
+		}
+
+		opstr += strconv.Itoa(int(ins.Off)) // "jeq r1, #128, +2"
+
+		io.WriteString(w, opstr)
+
+	case ST, STX:
+		opstr := class.String() + ins.Opcode.Size().String() + "\t[" // "sth ["
+		opstr += ins.Dst.String()                                    // "sth [r1"
+		if ins.Off >= 0 {
+			opstr += "+" // "sth [r1+"
+		}
+		opstr += strconv.Itoa(int(ins.Off)) + "], " // "sth [r1+24], "
+
+		if class == ST {
+			if sym := s.symbol(index); sym == "" {
+				opstr += "#" + strconv.Itoa(int(ins.Imm)) // "sth [r1+24], #42"
+			} else {
+				opstr += "$" + sym // "sth [r1+24], $something"
+			}
+		} else {
+			opstr += ins.Src.String() // "stxw [r1+24], r3"
+		}
+
+		io.WriteString(w, opstr)
+	}
+}
+
+func (s *InstructionStream) symbol(index int) string {
+	symbolMaps := []map[string][]int{
+		s.mapSyms,
+		s.imm64Syms,
+		s.imm32Syms,
+	}
+	for _, symbolMap := range symbolMaps {
+		for sym, indexes := range symbolMap {
+			for _, symindex := range indexes {
+				if index == symindex {
+					return sym
+				}
+			}
+		}
+	}
+	return ""
+}
+
+type stickyErrorWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (sew *stickyErrorWriter) Write(p []byte) (int, error) {
+	if sew.err != nil {
+		return 0, sew.err
+	}
+	n, err := sew.w.Write(p)
+	sew.err = err
+	return n, err
 }
 
 // Raw emits a raw instruction.
@@ -862,7 +1002,7 @@ func (s *InstructionStream) MemStoreReg(sz Size, dst, src Register, off int16) {
 // *(uintsz *)(dst + off) = imm
 func (s *InstructionStream) MemStoreImm(sz Size, dst Register, off int16, imm int32) {
 	s.Raw(Instruction{
-		Opcode: memOpcode(STX, sz, MEM), // TODO(acln): investigate this
+		Opcode: memOpcode(ST, sz, MEM), // TODO(acln): investigate this
 		Dst:    dst,
 		Off:    off,
 		Imm:    imm,
@@ -874,7 +1014,7 @@ func (s *InstructionStream) MemStoreImm(sz Size, dst Register, off int16, imm in
 // *(uintsz *)(dst + off) = $sym
 func (s *InstructionStream) MemStoreSym(sz Size, dst Register, off int16, sym string) {
 	s.RawSym(Instruction{
-		Opcode: memOpcode(STX, sz, MEM), // TODO(acln): investigate this
+		Opcode: memOpcode(ST, sz, MEM), // TODO(acln): investigate this
 		Dst:    dst,
 		Off:    off,
 	}, sym)
